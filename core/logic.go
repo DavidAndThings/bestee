@@ -1,5 +1,5 @@
 package core
 
 type LogicBlock interface {
-	Process(array *ExpressionArray, queue *ExpressionQueue)
+	Process(machine *Machine)
 }
