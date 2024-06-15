@@ -1,7 +1,7 @@
 package main
 
 import (
-	"bestee/logic"
+	"bestee/core"
 	"bestee/util"
 	"fmt"
 )
@@ -15,10 +15,10 @@ func BesteeFromConfigFile() *Bestee {
 	return &Bestee{config: util.ReadJsonIntoMap(configPath)}
 }
 
-func (bestee *Bestee) GetEntityBank() *logic.EntityBank {
+func (bestee *Bestee) GetEntityBank() *core.EntityBank {
 
 	executablePath := util.GetExcutableDir()
-	entities := logic.NewEmptyEntityBank()
+	entities := core.NewEmptyEntityBank()
 
 	for _, filePath := range bestee.config["entity_files"].([]interface{}) {
 		entities.AddFromJsonFile(executablePath + filePath.(string))

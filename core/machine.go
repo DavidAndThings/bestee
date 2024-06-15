@@ -30,8 +30,7 @@ func (mach *Machine) Run() {
 func (mach *Machine) increment() {
 
 	for _, block := range mach.logic {
-		block.Process(mach.array, mach.queue)
-	}
+		block.Process(mach)
 
 	for !mach.queue.IsEmpty() {
 		exp := mach.queue.Pop()
