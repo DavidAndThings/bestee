@@ -31,10 +31,11 @@ func (mach *Machine) increment() {
 
 	for _, block := range mach.logic {
 		block.Process(mach)
+	}
 
 	for !mach.queue.IsEmpty() {
 		exp := mach.queue.Pop()
-		exp.Evaluate(mach.array)
+		exp.Evaluate(mach)
 	}
 
 }
