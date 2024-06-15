@@ -5,7 +5,7 @@ type Expression struct {
 	data   []interface{}
 }
 
-func (exp *Expression) Evaluate(array *ExpressionArray) {
+func (exp *Expression) Evaluate(machine *Machine) {
 
 }
 
