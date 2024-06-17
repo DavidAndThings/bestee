@@ -10,7 +10,10 @@ type Expression struct {
 }
 
 func (exp Expression) Evaluate(machine *Machine) {
-
+	switch exp.header {
+	case ADD_INSTR:
+		machine.memory.Add(exp.data["to_add"].(Expression))
+	}
 }
 
 type ExpressionArray struct {
