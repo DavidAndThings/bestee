@@ -27,7 +27,7 @@ func (bank *EntityBank) Process(machine *Machine) {
 
 		if searchErr != nil {
 			for _, match := range entityMatches {
-				machine.AddToQueue(
+				machine.AddToInputQueue(
 					buildAddInstr(buildEntityTranslate(id, match["_id"].(string))),
 				)
 			}

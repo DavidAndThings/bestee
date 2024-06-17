@@ -1,20 +1,26 @@
 package core
 
 type Machine struct {
-	memory *ExpressionArray
-	queue  *ExpressionArray
-	logic  []LogicBlock
+	memory      *ExpressionArray
+	inputQueue  *ExpressionArray
+	outputQueue *ExpressionArray
+	logic       []LogicBlock
 }
 
 func NewMachineWithLogicBlocks(logicBlocks ...LogicBlock) *Machine {
-	return &Machine{memory: NewExpressionArray(), queue: NewExpressionArray(), logic: logicBlocks}
+	return &Machine{
+		memory:      NewExpressionArray(),
+		inputQueue:  NewExpressionArray(),
+		outputQueue: NewExpressionArray(),
+		logic:       logicBlocks,
+	}
 }
 
-func (mach *Machine) AddToQueue(newData ...Expression) {
-	mach.queue.Add(newData...)
+func (mach *Machine) AddToInputQueue(newData ...Expression) {
+	mach.inputQueue.Add(newData...)
 }
 
-func (mach *Machine) Run() {
+func (mach *Machine) RunEpoch() {
 
 	previousSize := -1
 
@@ -27,14 +33,22 @@ func (mach *Machine) Run() {
 
 }
 
+func (mach *Machine) OutputQueueIsEmpty() bool {
+	return mach.outputQueue.IsEmpty()
+}
+
+func (mach *Machine) PopOutputQueue() Expression {
+	return mach.outputQueue.Pop()
+}
+
 func (mach *Machine) increment() {
 
 	for _, block := range mach.logic {
 		block.Process(mach)
 	}
 
-	for !mach.queue.IsEmpty() {
-		exp := mach.queue.Pop()
+	for !mach.inputQueue.IsEmpty() {
+		exp := mach.inputQueue.Pop()
 		exp.Evaluate(mach)
 	}
 
