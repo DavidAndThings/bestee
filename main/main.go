@@ -15,6 +15,10 @@ func BesteeFromConfigFile() *Bestee {
 	return &Bestee{config: util.ReadJsonIntoMap(configPath)}
 }
 
+func (bestee *Bestee) GetMachine() *core.Machine {
+	return core.NewMachineWithLogicBlocks(bestee.GetEntityBank())
+}
+
 func (bestee *Bestee) GetEntityBank() *core.EntityBank {
 
 	executablePath := util.GetExcutableDir()
