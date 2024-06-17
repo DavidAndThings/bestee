@@ -1,5 +1,9 @@
 package core
 
+const ENTITY_SPECIFY = "ENTITY_SPECIFY"
+const ENTITY_TRANSLATE = "ENTITY_TRANSLATE"
+const ADD_INSTR = "ADD_INSTR"
+
 type Expression struct {
 	header string
 	data   map[string]interface{}
@@ -33,4 +37,27 @@ func (array *ExpressionArray) Add(newData ...Expression) {
 
 func (array *ExpressionArray) Size() int {
 	return len(array.data)
+}
+
+func buildAddInstr(exp Expression) Expression {
+
+	return Expression{
+		header: ADD_INSTR,
+		data: map[string]interface{}{
+			"to_add": exp,
+		},
+	}
+
+}
+
+func buildEntityTranslate(from string, to string) Expression {
+
+	return Expression{
+		header: ENTITY_TRANSLATE,
+		data: map[string]interface{}{
+			"from": from,
+			"to":   to,
+		},
+	}
+
 }
