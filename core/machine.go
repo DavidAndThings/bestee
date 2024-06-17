@@ -1,16 +1,16 @@
 package core
 
 type Machine struct {
-	array *ExpressionArray
-	queue *ExpressionQueue
-	logic []LogicBlock
+	memory *ExpressionArray
+	queue  *ExpressionArray
+	logic  []LogicBlock
 }
 
 func NewMachineWithLogicBlocks(logicBlocks ...LogicBlock) *Machine {
-	return &Machine{array: NewExpressionArray(), queue: NewExpressionQueue(), logic: logicBlocks}
+	return &Machine{memory: NewExpressionArray(), queue: NewExpressionArray(), logic: logicBlocks}
 }
 
-func (mach *Machine) AddToQueue(newData ...*Expression) {
+func (mach *Machine) AddToQueue(newData ...Expression) {
 	mach.queue.Add(newData...)
 }
 
@@ -18,9 +18,9 @@ func (mach *Machine) Run() {
 
 	previousSize := -1
 
-	for mach.array.Size() > previousSize {
+	for mach.memory.Size() > previousSize {
 
-		previousSize = mach.array.Size()
+		previousSize = mach.memory.Size()
 		mach.increment()
 
 	}
