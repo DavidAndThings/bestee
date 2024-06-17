@@ -12,8 +12,16 @@ type Expression struct {
 func (exp Expression) Evaluate(machine *Machine) {
 	switch exp.header {
 	case ADD_INSTR:
-		machine.memory.Add(exp.data["to_add"].(Expression))
+		machine.memory.Add(exp.GetDataExpression("to_add"))
 	}
+}
+
+func (exp Expression) GetDataString(key string) string {
+	return exp.data[key].(string)
+}
+
+func (exp Expression) GetDataExpression(key string) Expression {
+	return exp.data[key].(Expression)
 }
 
 type ExpressionArray struct {
