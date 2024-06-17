@@ -39,3 +39,25 @@ func (mach *Machine) increment() {
 	}
 
 }
+
+func (mach *Machine) findUntranslatedSpecifications() map[string]Expression {
+
+	entitySpecifications := make(map[string]Expression)
+
+	for _, exp := range mach.memory.data {
+
+		switch exp.header {
+		case ENTITY_SPECIFY:
+			entitySpecifications[exp.data["_id"].(string)] = exp
+
+		case ENTITY_TRANSLATE:
+			if _, ok := entitySpecifications[exp.data["from"].(string)]; ok {
+				delete(entitySpecifications, exp.data["from"].(string))
+			}
+		}
+
+	}
+
+	return entitySpecifications
+
+}

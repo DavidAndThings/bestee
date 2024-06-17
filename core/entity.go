@@ -7,9 +7,6 @@ import (
 	"slices"
 )
 
-const _ENTITY_SPECIFY = "ENTITY_SPECIFY"
-const _ENTITY_TRANSLATE = "ENTITY_TRANSLATE"
-
 type EntityBank struct {
 	entities []map[string]interface{}
 }
@@ -24,41 +21,14 @@ func (bank *EntityBank) AddFromJsonFile(filePath string) {
 
 func (bank *EntityBank) Process(machine *Machine) {
 
-	entitySpecifications := make(map[string]Expression)
+	for id, specification := range machine.findUntranslatedSpecifications() {
 
-	for _, exp := range machine.memory.data {
-
-		switch exp.header {
-		case _ENTITY_SPECIFY:
-			entitySpecifications[exp.data["_id"].(string)] = exp
-
-		case _ENTITY_TRANSLATE:
-			if _, ok := entitySpecifications[exp.data["from"].(string)]; ok {
-				delete(entitySpecifications, exp.data["from"].(string))
-			}
-		}
-
-	}
-
-	for id, specification := range entitySpecifications {
-
-		entityMatches, searchErr := bank.findWithEntitySpecify(specification)
+		entityMatches, searchErr := bank.findEntitiesWithEntitySpecify(specification)
 
 		if searchErr != nil {
 			for _, match := range entityMatches {
 				machine.AddToQueue(
-					Expression{
-						header: "ADD_INSTR",
-						data: map[string]interface{}{
-							"to_add": Expression{
-								header: _ENTITY_TRANSLATE,
-								data: map[string]interface{}{
-									"from": id,
-									"to":   match["id"].(string),
-								},
-							},
-						},
-					},
+					buildAddInstr(buildEntityTranslate(id, match["_id"].(string))),
 				)
 			}
 		}
@@ -67,7 +37,7 @@ func (bank *EntityBank) Process(machine *Machine) {
 
 }
 
-func (bank *EntityBank) findWithEntitySpecify(exp Expression) ([]map[string]interface{}, error) {
+func (bank *EntityBank) findEntitiesWithEntitySpecify(exp Expression) ([]map[string]interface{}, error) {
 
 	matches := make([]map[string]interface{}, 0)
 
@@ -87,7 +57,7 @@ func (bank *EntityBank) findWithEntitySpecify(exp Expression) ([]map[string]inte
 
 func entityMatchesWithEntitySpecify(entity map[string]interface{}, exp Expression) bool {
 
-	if exp.header == _ENTITY_SPECIFY {
+	if exp.header == ENTITY_SPECIFY {
 
 		isEmpty := true
 		allCorrect := true
