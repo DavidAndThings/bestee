@@ -24,7 +24,7 @@ func NewMachineWithLogicBlocks(logicBlocks ...LogicBlock) *Machine {
 	}
 }
 
-func (mach *Machine) AddToInputQueue(newData ...Expression) {
+func (mach *Machine) AddToSignalQueue(newData ...Expression) {
 	mach.SignalQueue.Add(newData...)
 }
 
@@ -46,7 +46,7 @@ func (mach *Machine) increment() {
 	mach.queueLock.Lock()
 
 	for _, block := range mach.logic {
-		mach.AddToInputQueue(block.Process(mach)...)
+		mach.AddToSignalQueue(block.Process(mach)...)
 	}
 
 	for !mach.SignalQueue.IsEmpty() {
