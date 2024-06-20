@@ -19,7 +19,9 @@ func (bank *EntityBank) AddFromJsonFile(filePath string) {
 	bank.entities = append(bank.entities, util.ReadJsonIntoArray(filePath)...)
 }
 
-func (bank *EntityBank) Process(machine *Machine) {
+func (bank *EntityBank) Process(machine *Machine) []Expression {
+
+	newExps := make([]Expression, 0)
 
 	for id, specification := range machine.findUntranslatedSpecifications() {
 
@@ -27,13 +29,13 @@ func (bank *EntityBank) Process(machine *Machine) {
 
 		if searchErr == nil {
 			for _, match := range entityMatches {
-				machine.AddToInputQueue(
-					BuildAddInstr(BuildEntityTranslate(id, match["_id"].(string))),
-				)
+				newExps = append(newExps, BuildAddInstr(BuildEntityTranslate(id, match["_id"].(string))))
 			}
 		}
 
 	}
+
+	return newExps
 
 }
 

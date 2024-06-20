@@ -77,7 +77,7 @@ func (bestee *Bestee) keyboardInputLoop() {
 	for {
 
 		reader := bufio.NewReader(os.Stdin)
-		fmt.Print("Me: ")
+		fmt.Println("Me: ")
 		text, _ := reader.ReadString('\n')
 		trimmedText := strings.Trim(text, "\n")
 
