@@ -3,7 +3,6 @@ package core
 type Machine struct {
 	memory      *ExpressionArray
 	signalQueue *ExpressionArray
-	outputQueue *ExpressionArray
 	logic       []LogicBlock
 }
 
@@ -11,7 +10,6 @@ func NewMachineWithLogicBlocks(logicBlocks ...LogicBlock) *Machine {
 	return &Machine{
 		memory:      NewExpressionArray(),
 		signalQueue: NewExpressionArray(),
-		outputQueue: NewExpressionArray(),
 		logic:       logicBlocks,
 	}
 }
@@ -42,14 +40,6 @@ func (mach *Machine) increment() {
 	for !mach.signalQueue.IsEmpty() {
 		exp := mach.signalQueue.Pop()
 		exp.Evaluate(mach)
-	}
-
-}
-
-func (mach *Machine) DispatchOutputToChan(channel chan Expression) {
-
-	for !mach.outputQueue.IsEmpty() {
-		channel <- mach.outputQueue.Pop()
 	}
 
 }

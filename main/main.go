@@ -14,7 +14,6 @@ import (
 type Bestee struct {
 	config        map[string]interface{}
 	keyboardInput chan string
-	mainOutput    chan core.Expression
 }
 
 func BesteeFromConfigFile() *Bestee {
@@ -22,7 +21,6 @@ func BesteeFromConfigFile() *Bestee {
 	return &Bestee{
 		config:        util.ReadJsonIntoMap(configPath),
 		keyboardInput: make(chan string),
-		mainOutput:    make(chan core.Expression),
 	}
 }
 
@@ -46,7 +44,6 @@ func (bestee *Bestee) GetEntityBank() *core.EntityBank {
 func (bestee *Bestee) Run() {
 
 	go bestee.machineLoop()
-	go bestee.outputLoop()
 	bestee.keyboardInputLoop()
 
 }
@@ -70,21 +67,9 @@ func (bestee *Bestee) machineLoop() {
 			))
 
 			machine.RunEpoch()
-			machine.DispatchOutputToChan(bestee.mainOutput)
 
 		}
 	}
-}
-
-func (bestee *Bestee) outputLoop() {
-
-	for {
-		select {
-		case outputExp := <-bestee.mainOutput:
-			fmt.Println(outputExp)
-		}
-	}
-
 }
 
 func (bestee *Bestee) keyboardInputLoop() {
