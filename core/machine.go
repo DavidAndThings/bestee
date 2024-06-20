@@ -77,9 +77,7 @@ func (mach *Machine) findUntranslatedSpecifications() map[string]Expression {
 			entitySpecifications[exp.Data["_id"].(string)] = exp
 
 		case ENTITY_TRANSLATE:
-			if _, ok := entitySpecifications[exp.Data["from"].(string)]; ok {
-				delete(entitySpecifications, exp.Data["from"].(string))
-			}
+			delete(entitySpecifications, exp.Data["from"].(string))
 		}
 
 	}

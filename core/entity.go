@@ -2,7 +2,6 @@ package core
 
 import (
 	"bestee/util"
-	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -51,7 +50,7 @@ func (bank *EntityBank) findEntitiesWithEntitySpecify(exp Expression) ([]map[str
 	}
 
 	if len(matches) == 0 {
-		return nil, errors.New(fmt.Sprintf("No entity found matching expression: %s", exp))
+		return nil, fmt.Errorf("No entity found matching expression: %s", exp)
 	}
 
 	return matches, nil
