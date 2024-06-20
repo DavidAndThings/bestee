@@ -5,23 +5,25 @@ const ENTITY_TRANSLATE = "ENTITY_TRANSLATE"
 const ADD_INSTR = "ADD_INSTR"
 
 type Expression struct {
-	header string
-	data   map[string]interface{}
+	Header string
+	Data   map[string]interface{}
 }
 
 func (exp Expression) Evaluate(machine *Machine) {
-	switch exp.header {
+	switch exp.Header {
 	case ADD_INSTR:
 		machine.memory.Add(exp.GetDataExpression("to_add"))
+	case ENTITY_TRANSLATE:
+		machine.memory.Add(exp)
 	}
 }
 
 func (exp Expression) GetDataString(key string) string {
-	return exp.data[key].(string)
+	return exp.Data[key].(string)
 }
 
 func (exp Expression) GetDataExpression(key string) Expression {
-	return exp.data[key].(Expression)
+	return exp.Data[key].(Expression)
 }
 
 type ExpressionArray struct {
@@ -50,22 +52,22 @@ func (array *ExpressionArray) Size() int {
 	return len(array.data)
 }
 
-func buildAddInstr(exp Expression) Expression {
+func BuildAddInstr(exp Expression) Expression {
 
 	return Expression{
-		header: ADD_INSTR,
-		data: map[string]interface{}{
+		Header: ADD_INSTR,
+		Data: map[string]interface{}{
 			"to_add": exp,
 		},
 	}
 
 }
 
-func buildEntityTranslate(from string, to string) Expression {
+func BuildEntityTranslate(from string, to string) Expression {
 
 	return Expression{
-		header: ENTITY_TRANSLATE,
-		data: map[string]interface{}{
+		Header: ENTITY_TRANSLATE,
+		Data: map[string]interface{}{
 			"from": from,
 			"to":   to,
 		},
