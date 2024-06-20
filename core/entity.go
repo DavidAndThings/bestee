@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 )
 
 type EntityBank struct {
@@ -68,7 +69,7 @@ func entityMatchesWithEntitySpecify(entity map[string]interface{}, exp Expressio
 
 			isEmpty = false
 
-			if !slices.Contains([]string{"_id"}, key) && entity[key] != value {
+			if !slices.Contains([]string{"_id"}, key) && !strings.EqualFold(entity[key].(string), value.(string)) {
 				allCorrect = false
 				break
 			}
