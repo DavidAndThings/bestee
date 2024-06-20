@@ -5,16 +5,14 @@ const ENTITY_TRANSLATE = "ENTITY_TRANSLATE"
 const ADD_INSTR = "ADD_INSTR"
 
 type Expression struct {
-	Header string
-	Data   map[string]interface{}
+	Header string                 `json:"header"`
+	Data   map[string]interface{} `json:"data"`
 }
 
 func (exp Expression) Evaluate(machine *Machine) {
 	switch exp.Header {
 	case ADD_INSTR:
-		machine.memory.Add(exp.GetDataExpression("to_add"))
-	case ENTITY_TRANSLATE:
-		machine.memory.Add(exp)
+		machine.Memory.Add(exp.GetDataExpression("to_add"))
 	}
 }
 

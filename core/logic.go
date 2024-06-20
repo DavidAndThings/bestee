@@ -1,5 +1,5 @@
 package core
 
 type LogicBlock interface {
-	Process(machine *Machine)
+	Process(machine *Machine) []Expression
 }
