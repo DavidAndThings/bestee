@@ -25,10 +25,10 @@ func (bank *EntityBank) Process(machine *Machine) {
 
 		entityMatches, searchErr := bank.findEntitiesWithEntitySpecify(specification)
 
-		if searchErr != nil {
+		if searchErr == nil {
 			for _, match := range entityMatches {
 				machine.AddToInputQueue(
-					buildAddInstr(buildEntityTranslate(id, match["_id"].(string))),
+					BuildAddInstr(BuildEntityTranslate(id, match["_id"].(string))),
 				)
 			}
 		}
@@ -57,12 +57,12 @@ func (bank *EntityBank) findEntitiesWithEntitySpecify(exp Expression) ([]map[str
 
 func entityMatchesWithEntitySpecify(entity map[string]interface{}, exp Expression) bool {
 
-	if exp.header == ENTITY_SPECIFY {
+	if exp.Header == ENTITY_SPECIFY {
 
 		isEmpty := true
 		allCorrect := true
 
-		for key, value := range exp.data {
+		for key, value := range exp.Data {
 
 			isEmpty = false
 
