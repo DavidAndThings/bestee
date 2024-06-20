@@ -1,6 +1,8 @@
 package core
 
 import (
+	"sync"
+
 	"go.uber.org/zap"
 )
 
@@ -10,6 +12,7 @@ var sugarLogger = logger.Sugar()
 type Machine struct {
 	Memory      *ExpressionArray `json:"memory"`
 	SignalQueue *ExpressionArray `json:"signal_queue"`
+	queueLock   sync.Mutex
 	logic       []LogicBlock
 }
 
@@ -40,6 +43,8 @@ func (mach *Machine) RunEpoch() {
 
 func (mach *Machine) increment() {
 
+	mach.queueLock.Lock()
+
 	for _, block := range mach.logic {
 		mach.AddToInputQueue(block.Process(mach)...)
 	}
@@ -56,6 +61,8 @@ func (mach *Machine) increment() {
 			"signal_queue", mach.SignalQueue.data,
 		)
 	}
+
+	mach.queueLock.Unlock()
 
 }
 
