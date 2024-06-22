@@ -18,12 +18,13 @@ type Tokenizer struct {
 
 func newTokenizer() *Tokenizer {
 
+	exeDir := util.GetExcutableDir()
 	config := util.ReadConfigJson()
 	allTokens := make([]string, 0)
 
 	for _, tokenFilePath := range config["predefined_token_files"].([]string) {
 
-		tokens, err := util.ReadIntoStrArray(tokenFilePath)
+		tokens, err := util.ReadIntoStrArray(exeDir + tokenFilePath)
 
 		if err != nil {
 			allTokens = append(allTokens, tokens...)

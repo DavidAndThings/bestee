@@ -7,12 +7,34 @@ import (
 	"strings"
 )
 
+var entityBankInstance *EntityBank
+
 type EntityBank struct {
 	entities []map[string]interface{}
 }
 
-func NewEmptyEntityBank() *EntityBank {
-	return &EntityBank{entities: make([]map[string]interface{}, 0)}
+func NewEntityBank() *EntityBank {
+
+	exeDir := util.GetExcutableDir()
+	config := util.ReadConfigJson()
+	entities := make([]map[string]interface{}, 0)
+
+	for _, filePath := range config["entity_files"].([]interface{}) {
+		entities = append(entities, util.ReadJsonIntoArray(exeDir+filePath.(string))...)
+	}
+
+	return &EntityBank{entities: entities}
+
+}
+
+func GetEntityBankInstance() *EntityBank {
+
+	if entityBankInstance == nil {
+		entityBankInstance = NewEntityBank()
+	}
+
+	return entityBankInstance
+
 }
 
 func (bank *EntityBank) AddFromJsonFile(filePath string) {

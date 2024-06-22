@@ -2,7 +2,6 @@ package main
 
 import (
 	"bestee/core"
-	"bestee/util"
 	"bufio"
 	"fmt"
 	"os"
@@ -12,33 +11,17 @@ import (
 )
 
 type Bestee struct {
-	config        map[string]interface{}
 	keyboardInput chan string
 }
 
-func BesteeFromConfigFile() *Bestee {
-	configPath := util.GetExcutableDir() + "/config.json"
+func NewBestee() *Bestee {
 	return &Bestee{
-		config:        util.ReadJsonIntoMap(configPath),
 		keyboardInput: make(chan string),
 	}
 }
 
 func (bestee *Bestee) GetMachine() *core.Machine {
-	return core.NewMachineWithLogicBlocks(bestee.GetEntityBank())
-}
-
-func (bestee *Bestee) GetEntityBank() *core.EntityBank {
-
-	executablePath := util.GetExcutableDir()
-	entities := core.NewEmptyEntityBank()
-
-	for _, filePath := range bestee.config["entity_files"].([]interface{}) {
-		entities.AddFromJsonFile(executablePath + filePath.(string))
-	}
-
-	return entities
-
+	return core.NewMachineWithLogicBlocks(core.GetEntityBankInstance())
 }
 
 func (bestee *Bestee) Run() {
@@ -87,7 +70,7 @@ func (bestee *Bestee) keyboardInputLoop() {
 
 func main() {
 
-	bestee := BesteeFromConfigFile()
+	bestee := NewBestee()
 	bestee.Run()
 
 }
