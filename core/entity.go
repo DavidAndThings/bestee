@@ -29,7 +29,7 @@ func (bank *EntityBank) Process(machine *Machine) []Expression {
 
 		if searchErr == nil {
 			for _, match := range entityMatches {
-				newExps = append(newExps, BuildAddInstr(BuildEntityTranslate(id, match["_id"].(string))))
+				newExps = append(newExps, BuildEntityTranslate(id, match["_id"].(string)))
 			}
 		}
 
@@ -68,7 +68,8 @@ func entityMatchesWithEntitySpecify(entity map[string]interface{}, exp Expressio
 
 			isEmpty = false
 
-			if !slices.Contains([]string{"_id"}, key) && !strings.EqualFold(entity[key].(string), value.(string)) {
+			if !slices.Contains([]string{"_id"}, key) &&
+				!strings.EqualFold(entity[key].(string), value.(string)) {
 				allCorrect = false
 				break
 			}
