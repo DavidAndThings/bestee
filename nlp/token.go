@@ -22,11 +22,11 @@ func newTokenizer() *Tokenizer {
 	config := util.ReadConfigJson()
 	allTokens := make([]string, 0)
 
-	for _, tokenFilePath := range config["predefined_token_files"].([]string) {
+	for _, tokenFilePath := range config["predefined_token_files"].([]interface{}) {
 
-		tokens, err := util.ReadIntoStrArray(exeDir + tokenFilePath)
+		tokens, err := util.ReadIntoStrArray(exeDir + tokenFilePath.(string))
 
-		if err != nil {
+		if err == nil {
 			allTokens = append(allTokens, tokens...)
 		}
 
