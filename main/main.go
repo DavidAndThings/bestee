@@ -56,15 +56,13 @@ func (bestee *Bestee) machineLoop() {
 		select {
 		case keyboardInput := <-bestee.keyboardInput:
 
-			machine.AddToSignalQueue(core.BuildAddInstr(
-				core.Expression{
-					Header: core.ENTITY_SPECIFY,
-					Data: map[string]interface{}{
-						"_id":        uuid.New().String(),
-						"first_name": keyboardInput,
-					},
+			machine.AddToSignalQueue(core.Expression{
+				Header: core.ENTITY_SPECIFY,
+				Data: map[string]interface{}{
+					"_id":        uuid.New().String(),
+					"first_name": keyboardInput,
 				},
-			))
+			})
 
 			machine.RunEpoch()
 

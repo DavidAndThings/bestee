@@ -10,31 +10,35 @@ var logger, _ = zap.NewProduction()
 var sugarLogger = logger.Sugar()
 
 type Machine struct {
-	Memory      *ExpressionArray `json:"memory"`
-	SignalQueue *ExpressionArray `json:"signal_queue"`
-	queueLock   sync.Mutex
-	logic       []LogicBlock
+	array     []Expression
+	counter   int
+	arrayLock sync.Mutex
+	logic     LogicBlock
 }
 
-func NewMachineWithLogicBlocks(logicBlocks ...LogicBlock) *Machine {
+func NewMachineWithLogicBlocks(logicBlock LogicBlock) *Machine {
 	return &Machine{
-		Memory:      NewExpressionArray(),
-		SignalQueue: NewExpressionArray(),
-		logic:       logicBlocks,
+		array:   make([]Expression, 0),
+		counter: 0,
+		logic:   logicBlock,
 	}
 }
 
 func (mach *Machine) AddToSignalQueue(newData ...Expression) {
-	mach.SignalQueue.Add(newData...)
+
+	mach.arrayLock.Lock()
+	mach.array = append(mach.array, newData...)
+	mach.arrayLock.Unlock()
+
 }
 
 func (mach *Machine) RunEpoch() {
 
-	previousSize := -1
+	previousCounterValue := -1
 
-	for mach.Memory.Size() > previousSize {
+	for mach.counter > previousCounterValue {
 
-		previousSize = mach.Memory.Size()
+		previousCounterValue = mach.counter
 		mach.increment()
 
 	}
@@ -43,26 +47,36 @@ func (mach *Machine) RunEpoch() {
 
 func (mach *Machine) increment() {
 
-	mach.queueLock.Lock()
+	mach.runLogic()
+	mach.arrayLock.Lock()
 
-	for _, block := range mach.logic {
-		mach.AddToSignalQueue(block.Process(mach)...)
-	}
-
-	for !mach.SignalQueue.IsEmpty() {
-
-		exp := mach.SignalQueue.Pop()
-		exp.Evaluate(mach)
+	for _, exp := range mach.getAfterCounter() {
 
 		sugarLogger.Infow(
 			"Machine State",
 			"expression_being_processed", exp,
-			"memory", mach.Memory.data,
-			"signal_queue", mach.SignalQueue.data,
 		)
+
 	}
 
-	mach.queueLock.Unlock()
+	mach.counter = len(mach.array)
+	mach.arrayLock.Unlock()
+
+}
+
+func (mach *Machine) getBeforeCounter() []Expression {
+	return mach.array[0:mach.counter]
+}
+
+func (mach *Machine) getAfterCounter() []Expression {
+	return mach.array[mach.counter:len(mach.array)]
+}
+
+func (mach *Machine) runLogic() {
+
+	mach.arrayLock.Lock()
+	mach.array = append(mach.array, mach.logic.Process(mach)...)
+	mach.arrayLock.Unlock()
 
 }
 
@@ -70,7 +84,7 @@ func (mach *Machine) findUntranslatedSpecifications() map[string]Expression {
 
 	entitySpecifications := make(map[string]Expression)
 
-	for _, exp := range mach.Memory.data {
+	for _, exp := range mach.getBeforeCounter() {
 
 		switch exp.Header {
 		case ENTITY_SPECIFY:
