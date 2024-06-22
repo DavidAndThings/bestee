@@ -2,7 +2,6 @@ package core
 
 const ENTITY_SPECIFY = "ENTITY_SPECIFY"
 const ENTITY_TRANSLATE = "ENTITY_TRANSLATE"
-const ADD_INSTR = "ADD_INSTR"
 
 type Expression struct {
 	Header string                 `json:"header"`
