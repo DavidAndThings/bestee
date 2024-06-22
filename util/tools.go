@@ -1,6 +1,7 @@
 package util
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -52,5 +53,32 @@ func GetExcutableDir() string {
 	}
 
 	return filepath.Dir(ex)
+
+}
+
+func ReadConfigJson() map[string]interface{} {
+
+	exeDir := GetExcutableDir()
+	return ReadJsonIntoMap(exeDir + "/config.json")
+
+}
+
+func ReadIntoStrArray(path string) ([]string, error) {
+
+	file, err := os.Open(path)
+
+	if err != nil {
+		return nil, err
+	}
+
+	defer file.Close()
+
+	var lines []string
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		lines = append(lines, scanner.Text())
+	}
+
+	return lines, scanner.Err()
 
 }

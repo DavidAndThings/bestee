@@ -17,11 +17,13 @@ type Machine struct {
 }
 
 func NewMachineWithLogicBlocks(logicBlock LogicBlock) *Machine {
+
 	return &Machine{
 		array:   make([]Expression, 0),
 		counter: 0,
 		logic:   logicBlock,
 	}
+
 }
 
 func (mach *Machine) AddToSignalQueue(newData ...Expression) {

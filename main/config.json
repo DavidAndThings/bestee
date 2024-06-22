@@ -1,3 +1,5 @@
 {
-  "entity_files": ["/db/entities.json"]
+  "entity_files": ["/db/entities.json"],
+  "binary_exchange_pairs": ["/db/binary_exchange_pairs.json"],
+  "predefined_token_files": ["/db/tokens.txt"]
 }
