@@ -10,18 +10,18 @@ var logger, _ = zap.NewProduction()
 var sugarLogger = logger.Sugar()
 
 type Machine struct {
-	array     []Expression
-	counter   int
-	arrayLock sync.Mutex
-	logic     LogicBlock
+	array       []Expression
+	counter     int
+	arrayLock   sync.Mutex
+	logicBlocks []LogicBlock
 }
 
-func NewMachineWithLogicBlocks(logicBlock LogicBlock) *Machine {
+func NewMachineWithLogicBlocks(logicBlocks ...LogicBlock) *Machine {
 
 	return &Machine{
-		array:   make([]Expression, 0),
-		counter: 0,
-		logic:   logicBlock,
+		array:       make([]Expression, 0),
+		counter:     0,
+		logicBlocks: logicBlocks,
 	}
 
 }
@@ -77,7 +77,11 @@ func (mach *Machine) getAfterCounter() []Expression {
 func (mach *Machine) runLogic() {
 
 	mach.arrayLock.Lock()
-	mach.array = append(mach.array, mach.logic.Process(mach)...)
+
+	for _, block := range mach.logicBlocks {
+		mach.array = append(mach.array, block.Process(mach)...)
+	}
+
 	mach.arrayLock.Unlock()
 
 }
@@ -99,5 +103,25 @@ func (mach *Machine) findUntranslatedSpecifications() map[string]Expression {
 	}
 
 	return entitySpecifications
+
+}
+
+func (mach *Machine) findUnmatchedTokenizedText() map[string]Expression {
+
+	tokenizedText := make(map[string]Expression)
+
+	for _, exp := range mach.getBeforeCounter() {
+
+		switch exp.Header {
+		case TOKENIZED_TEXT:
+			tokenizedText[exp.Data["_id"].(string)] = exp
+
+		case RESPONSE_FROM_BINARY:
+			delete(tokenizedText, exp.Data["for"].(string))
+		}
+
+	}
+
+	return tokenizedText
 
 }

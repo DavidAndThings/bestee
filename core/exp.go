@@ -1,7 +1,15 @@
 package core
 
+import (
+	"bestee/nlp"
+
+	"github.com/google/uuid"
+)
+
 const ENTITY_SPECIFY = "ENTITY_SPECIFY"
 const ENTITY_TRANSLATE = "ENTITY_TRANSLATE"
+const TOKENIZED_TEXT = "TOKENIZED_TEXT"
+const RESPONSE_FROM_BINARY = "RESPONSE_FROM_BINARY"
 
 type Expression struct {
 	Header string                 `json:"header"`
@@ -23,6 +31,30 @@ func BuildEntityTranslate(from string, to string) Expression {
 		Data: map[string]interface{}{
 			"from": from,
 			"to":   to,
+		},
+	}
+
+}
+
+func BuildTokenizedText(text string) Expression {
+
+	return Expression{
+		Header: TOKENIZED_TEXT,
+		Data: map[string]interface{}{
+			"_id":  uuid.New().String(),
+			"text": nlp.GetTokenizerInstance().Run(text),
+		},
+	}
+
+}
+
+func BuildResponseFromBinary(respFor string, resp []string) Expression {
+
+	return Expression{
+		Header: RESPONSE_FROM_BINARY,
+		Data: map[string]interface{}{
+			"for":  respFor,
+			"resp": resp,
 		},
 	}
 

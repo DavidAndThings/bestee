@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"os"
 	"strings"
-
-	"github.com/google/uuid"
 )
 
 type Bestee struct {
@@ -21,7 +19,12 @@ func NewBestee() *Bestee {
 }
 
 func (bestee *Bestee) GetMachine() *core.Machine {
-	return core.NewMachineWithLogicBlocks(core.GetEntityBankInstance())
+
+	return core.NewMachineWithLogicBlocks(
+		core.GetEntityBankInstance(),
+		core.GetBinaryExchangeBankInstance(),
+	)
+
 }
 
 func (bestee *Bestee) Run() {
@@ -39,14 +42,7 @@ func (bestee *Bestee) machineLoop() {
 		select {
 		case keyboardInput := <-bestee.keyboardInput:
 
-			machine.AddToSignalQueue(core.Expression{
-				Header: core.ENTITY_SPECIFY,
-				Data: map[string]interface{}{
-					"_id":        uuid.New().String(),
-					"first_name": keyboardInput,
-				},
-			})
-
+			machine.AddToSignalQueue(core.BuildTokenizedText(keyboardInput))
 			machine.RunEpoch()
 
 		}
