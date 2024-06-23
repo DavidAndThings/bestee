@@ -13,21 +13,21 @@ var sugarLogger = logger.Sugar()
 var tokenizerInstance *Tokenizer
 
 type Tokenizer struct {
-	tokens []string
+	tokens *util.StrHashStore
 }
 
 func newTokenizer() *Tokenizer {
 
 	exeDir := util.GetExcutableDir()
 	config := util.ReadConfigJson()
-	allTokens := make([]string, 0)
+	allTokens := util.NewStrHashStore()
 
 	for _, tokenFilePath := range config["predefined_token_files"].([]interface{}) {
 
 		tokens, err := util.ReadIntoStrArray(exeDir + tokenFilePath.(string))
 
 		if err == nil {
-			allTokens = append(allTokens, tokens...)
+			allTokens.AddAll(tokens...)
 		}
 
 	}
@@ -100,11 +100,8 @@ func (tokenizer *Tokenizer) Contains(token string) int {
 
 	ans := 0
 
-	for _, t := range tokenizer.tokens {
-		if t == token {
-			ans = 1
-			break
-		}
+	if tokenizer.tokens.Contains(token) {
+		ans = 1
 	}
 
 	return ans

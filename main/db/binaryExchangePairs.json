@@ -2,5 +2,9 @@
   {
     "input": "hello world",
     "output": "hey, hey"
+  },
+  {
+    "input": "What is your name?",
+    "output": "My name is Xiao Wang"
   }
 ]

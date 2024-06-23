@@ -2,6 +2,8 @@ package util
 
 import (
 	"bufio"
+	"crypto/md5"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -80,5 +82,13 @@ func ReadIntoStrArray(path string) ([]string, error) {
 	}
 
 	return lines, scanner.Err()
+
+}
+
+func GetMD5Hash(text string) string {
+
+	hasher := md5.New()
+	hasher.Write([]byte(text))
+	return hex.EncodeToString(hasher.Sum(nil))
 
 }

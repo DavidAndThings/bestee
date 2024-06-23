@@ -64,8 +64,8 @@ func newBinaryExchangeBank() *BinaryExchangeBank {
 			allExchangePairs = append(
 				allExchangePairs,
 				BinaryExchangePair{
-					input:  tokenizer.Run(doc["input"].(string)),
-					output: tokenizer.Run(doc["output"].(string)),
+					input:  tokenizer.Run(strings.ToLower(doc["input"].(string))),
+					output: tokenizer.Run(strings.ToLower(doc["output"].(string))),
 				},
 			)
 
