@@ -3,7 +3,6 @@ package main
 import (
 	"bestee/core"
 	"bufio"
-	"fmt"
 	"os"
 	"strings"
 )
@@ -54,7 +53,6 @@ func (bestee *Bestee) keyboardInputLoop() {
 	for {
 
 		reader := bufio.NewReader(os.Stdin)
-		fmt.Println("Me: ")
 		text, _ := reader.ReadString('\n')
 		trimmedText := strings.Trim(text, "\n")
 
