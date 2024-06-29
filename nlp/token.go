@@ -1,7 +1,7 @@
 package nlp
 
 import (
-	"bestee/util"
+	"bestee/info"
 	"strings"
 
 	"go.uber.org/zap"
@@ -10,44 +10,9 @@ import (
 var logger, _ = zap.NewProduction()
 var sugarLogger = logger.Sugar()
 
-var tokenizerInstance *Tokenizer
+func Tokenize(text string) []string {
 
-type Tokenizer struct {
-	tokens *util.StrHashStore
-}
-
-func newTokenizer() *Tokenizer {
-
-	exeDir := util.GetExcutableDir()
-	config := util.ReadConfigJson()
-	allTokens := util.NewStrHashStore()
-
-	for _, tokenFilePath := range config["predefined_token_files"].([]interface{}) {
-
-		tokens, err := util.ReadIntoStrArray(exeDir + tokenFilePath.(string))
-
-		if err == nil {
-			allTokens.AddAll(tokens...)
-		}
-
-	}
-
-	return &Tokenizer{tokens: allTokens}
-
-}
-
-func GetTokenizerInstance() *Tokenizer {
-
-	if tokenizerInstance == nil {
-		tokenizerInstance = newTokenizer()
-	}
-
-	return tokenizerInstance
-
-}
-
-func (tokenizer *Tokenizer) Run(text string) []string {
-
+	tokenDb := info.GetTokenDatabaseInstance()
 	upperBound := len(text) + 1
 	scores := make([]float64, upperBound)
 	breakPoints := make([][]int, upperBound)
@@ -66,7 +31,7 @@ func (tokenizer *Tokenizer) Run(text string) []string {
 
 		for j := range i {
 			subtext := text[j:i]
-			score := scores[j] + float64(len(subtext))*float64(tokenizer.Contains(subtext))
+			score := scores[j] + float64(len(subtext))*float64(tokenDb.HasToken(subtext))
 
 			if score > float64(localMax) {
 				localMax = score
@@ -93,18 +58,6 @@ func (tokenizer *Tokenizer) Run(text string) []string {
 	)
 
 	return cleanTokens
-
-}
-
-func (tokenizer *Tokenizer) Contains(token string) int {
-
-	ans := 0
-
-	if tokenizer.tokens.Contains(token) {
-		ans = 1
-	}
-
-	return ans
 
 }
 

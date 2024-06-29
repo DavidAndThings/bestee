@@ -6,8 +6,10 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
+	"strconv"
 )
 
 func ReadJsonIntoMap(filePath string) map[string]interface{} {
@@ -90,5 +92,65 @@ func GetMD5Hash(text string) string {
 	hasher := md5.New()
 	hasher.Write([]byte(text))
 	return hex.EncodeToString(hasher.Sum(nil))
+
+}
+
+func StrArrayToFloatArray(input []string) []float64 {
+
+	ans := make([]float64, len(input))
+
+	for i, val := range input {
+
+		newVal, err := strconv.ParseFloat(val, 64)
+
+		if err != nil {
+			panic(fmt.Sprintf("Cannot convert str: %s to float!", val))
+		}
+
+		ans[i] = newVal
+
+	}
+
+	return ans
+
+}
+
+func CosineSimilarity(a []float64, b []float64) float64 {
+	return DotProduct(a, b) / (Magnitude(a) * Magnitude(b))
+}
+
+func DotProduct(a []float64, b []float64) float64 {
+
+	if len(a) != len(b) {
+
+		panic(
+			fmt.Sprintf(
+				"Input vectors: %s and %s are not the same length!",
+				fmt.Sprint(a),
+				fmt.Sprint(b),
+			),
+		)
+
+	}
+
+	ans := 0.0
+
+	for i := range len(a) {
+		ans += a[i] * b[i]
+	}
+
+	return ans
+
+}
+
+func Magnitude(a []float64) float64 {
+
+	ans := 0.0
+
+	for _, val := range a {
+		ans += val * val
+	}
+
+	return math.Sqrt(ans)
 
 }

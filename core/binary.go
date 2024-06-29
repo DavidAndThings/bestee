@@ -51,7 +51,6 @@ func newBinaryExchangeBank() *BinaryExchangeBank {
 
 	exePath := util.GetExcutableDir()
 	config := util.ReadConfigJson()
-	tokenizer := nlp.GetTokenizerInstance()
 
 	allExchangePairs := make([]BinaryExchangePair, 0)
 
@@ -64,8 +63,8 @@ func newBinaryExchangeBank() *BinaryExchangeBank {
 			allExchangePairs = append(
 				allExchangePairs,
 				BinaryExchangePair{
-					input:  tokenizer.Run(strings.ToLower(doc["input"].(string))),
-					output: tokenizer.Run(strings.ToLower(doc["output"].(string))),
+					input:  nlp.Tokenize(doc["input"].(string)),
+					output: nlp.Tokenize(doc["output"].(string)),
 				},
 			)
 

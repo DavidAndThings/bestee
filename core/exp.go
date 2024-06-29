@@ -42,7 +42,7 @@ func BuildTokenizedText(text string) Expression {
 		Header: TOKENIZED_TEXT,
 		Data: map[string]interface{}{
 			"_id":  uuid.New().String(),
-			"text": nlp.GetTokenizerInstance().Run(text),
+			"text": nlp.Tokenize(text),
 		},
 	}
 

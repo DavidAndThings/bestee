@@ -1,5 +1,11 @@
 {
   "entity_files": ["/db/entities.json"],
   "binary_exchange_pairs": ["/db/binaryExchangePairs.json"],
-  "predefined_token_files": ["/db/tokens.txt"]
+  "token_redis": {
+    "host": "localhost",
+    "port": 25061,
+    "username": "default",
+    "password": "",
+    "db": 0
+  }
 }
