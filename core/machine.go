@@ -1,7 +1,8 @@
 package core
 
 import (
-	"sync"
+	"bestee/util"
+	"fmt"
 
 	"go.uber.org/zap"
 )
@@ -10,118 +11,40 @@ var logger, _ = zap.NewProduction()
 var sugarLogger = logger.Sugar()
 
 type Machine struct {
-	array       []Expression
-	counter     int
-	arrayLock   sync.Mutex
-	logicBlocks []LogicBlock
+	signalQueue *util.SynchronizedQueue[Signal]
+	memory      *Memory
 }
 
 func NewMachineWithLogicBlocks(logicBlocks ...LogicBlock) *Machine {
 
 	return &Machine{
-		array:       make([]Expression, 0),
-		counter:     0,
-		logicBlocks: logicBlocks,
+		signalQueue: util.NewSynchronizedQueue[Signal](),
+		memory:      newMemoryFromLogicBlocks(logicBlocks...),
 	}
 
 }
 
-func (mach *Machine) AddToSignalQueue(newData ...Expression) {
-
-	mach.arrayLock.Lock()
-	mach.array = append(mach.array, newData...)
-	mach.arrayLock.Unlock()
-
+func (mach *Machine) AddToSignalQueue(newData ...Signal) {
+	mach.signalQueue.Enqueue(newData...)
 }
 
 func (mach *Machine) RunEpoch() {
 
-	previousCounterValue := -1
+	for !mach.signalQueue.IsEmpty() {
 
-	for mach.counter > previousCounterValue {
+		signal := mach.signalQueue.Pop()
 
-		previousCounterValue = mach.counter
-		mach.increment()
-
-	}
-
-}
-
-func (mach *Machine) increment() {
-
-	mach.runLogic()
-	mach.arrayLock.Lock()
-
-	for _, exp := range mach.getAfterCounter() {
-
-		sugarLogger.Infow(
-			"Machine State",
-			"expression_being_processed", exp,
-		)
+		mach.processSignal(signal)
+		mach.memory.Remember(signal)
+		mach.AddToSignalQueue(mach.memory.Ruminate()...)
 
 	}
 
-	mach.counter = len(mach.array)
-	mach.arrayLock.Unlock()
-
 }
 
-func (mach *Machine) getBeforeCounter() []Expression {
-	return mach.array[0:mach.counter]
-}
-
-func (mach *Machine) getAfterCounter() []Expression {
-	return mach.array[mach.counter:len(mach.array)]
-}
-
-func (mach *Machine) runLogic() {
-
-	mach.arrayLock.Lock()
-
-	for _, block := range mach.logicBlocks {
-		mach.array = append(mach.array, block.Process(mach)...)
+func (mach *Machine) processSignal(signal Signal) {
+	switch signal.Type {
+	case BINARY_RESPONSE:
+		fmt.Println(signal.Text)
 	}
-
-	mach.arrayLock.Unlock()
-
-}
-
-func (mach *Machine) findUntranslatedSpecifications() map[string]Expression {
-
-	entitySpecifications := make(map[string]Expression)
-
-	for _, exp := range mach.getBeforeCounter() {
-
-		switch exp.Header {
-		case ENTITY_SPECIFY:
-			entitySpecifications[exp.Data["_id"].(string)] = exp
-
-		case ENTITY_TRANSLATE:
-			delete(entitySpecifications, exp.Data["from"].(string))
-		}
-
-	}
-
-	return entitySpecifications
-
-}
-
-func (mach *Machine) findUnmatchedTokenizedText() map[string]Expression {
-
-	tokenizedText := make(map[string]Expression)
-
-	for _, exp := range mach.getBeforeCounter() {
-
-		switch exp.Header {
-		case TOKENIZED_TEXT:
-			tokenizedText[exp.Data["_id"].(string)] = exp
-
-		case RESPONSE_FROM_BINARY:
-			delete(tokenizedText, exp.Data["for"].(string))
-		}
-
-	}
-
-	return tokenizedText
-
 }

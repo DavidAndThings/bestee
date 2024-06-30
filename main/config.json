@@ -1,6 +1,6 @@
 {
-  "entity_files": ["/db/entities.json"],
-  "binary_exchange_pairs": ["/db/binaryExchangePairs.json"],
+  "prebuilt_exchange_pairs": ["/db/prebuilt_exchange_pairs.json"],
+  "people": ["/db/people_1.json"],
   "token_redis": {
     "host": "localhost",
     "port": 25061,

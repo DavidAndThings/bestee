@@ -1,9 +1,6 @@
 package nlp
 
-import (
-	"bestee/info"
-	"bestee/util"
-)
+import "bestee/util"
 
 type GlobalAlignmentResult struct {
 	SequenceOne []string
@@ -13,7 +10,7 @@ type GlobalAlignmentResult struct {
 
 func CosineSimilarity(a, b string) float64 {
 
-	tokenDb := info.GetTokenDatabaseInstance()
+	tokenDb := GetTokenDatabaseInstance()
 	return util.CosineSimilarity(tokenDb.GetEmbedding(a), tokenDb.GetEmbedding(b))
 
 }
@@ -63,19 +60,22 @@ func backTraceForAlignment(
 
 	for i > 0 || j > 0 {
 
-		if i > 0 && j > 0 && scoreMatrix[i][j] == CosineSimilarity(a[i-1], b[j-1])+scoreMatrix[i-1][j-1] {
+		if i > 0 && j > 0 &&
+			scoreMatrix[i][j] == CosineSimilarity(a[i-1], b[j-1])+scoreMatrix[i-1][j-1] {
 
 			alignmentA = append([]string{a[i-1]}, alignmentA...)
 			alignmentB = append([]string{b[j-1]}, alignmentB...)
 			i, j = i-1, j-1
 
-		} else if i > 0 && scoreMatrix[i][j] == scoreMatrix[i-1][j]+gapPenalty {
+		} else if i > 0 &&
+			scoreMatrix[i][j] == scoreMatrix[i-1][j]+gapPenalty {
 
 			alignmentA = append([]string{a[i-1]}, alignmentA...)
 			alignmentB = append([]string{"-"}, alignmentB...)
 			i = i - 1
 
-		} else if j > 0 && scoreMatrix[i][j] == scoreMatrix[i][j-1]+gapPenalty {
+		} else if j > 0 &&
+			scoreMatrix[i][j] == scoreMatrix[i][j-1]+gapPenalty {
 
 			alignmentA = append([]string{"-"}, alignmentA...)
 			alignmentB = append([]string{b[j-1]}, alignmentB...)

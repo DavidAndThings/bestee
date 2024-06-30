@@ -1,117 +1,47 @@
 package core
 
 import (
+	"bestee/info"
 	"bestee/nlp"
-	"bestee/util"
-	"fmt"
-	"strings"
 )
 
-var binaryExchangeBankInstance *BinaryExchangeBank
-
-type BinaryExchangePair struct {
-	input  []string
-	output []string
+type BinaryExchangeBlock struct {
+	entities *info.EntityBank
+	prebuilt *info.PrebuiltExchangeBank
 }
 
-func (pair BinaryExchangePair) matchesInput(query []string) bool {
+func NewBinaryExchangeBlock() *BinaryExchangeBlock {
 
-	if len(query) != len(pair.input) {
-		return false
+	return &BinaryExchangeBlock{
+		entities: info.GetEntityBankInstance(),
+		prebuilt: info.GetPrebuiltExchangeBankInstance(),
 	}
 
-	ans := true
-
-	for i := range len(query) {
-		if strings.ToLower(query[i]) != strings.ToLower(pair.input[i]) {
-			ans = false
-			break
-		}
-	}
-
-	return ans
-
 }
 
-type BinaryExchangeBank struct {
-	data []BinaryExchangePair
-}
+func (bank *BinaryExchangeBlock) Process(memory *Memory) []Signal {
 
-func GetBinaryExchangeBankInstance() *BinaryExchangeBank {
+	newExps := make([]Signal, 0)
+	unmatchedPlainText := memory.runQuery(findUnmatchedPlainText)
 
-	if binaryExchangeBankInstance == nil {
-		binaryExchangeBankInstance = newBinaryExchangeBank()
-	}
-
-	return binaryExchangeBankInstance
-
-}
-
-func newBinaryExchangeBank() *BinaryExchangeBank {
-
-	exePath := util.GetExcutableDir()
-	config := util.ReadConfigJson()
-
-	allExchangePairs := make([]BinaryExchangePair, 0)
-
-	for _, partialPath := range config["binary_exchange_pairs"].([]interface{}) {
-
-		filePath := exePath + partialPath.(string)
-
-		for _, doc := range util.ReadJsonIntoArray(filePath) {
-
-			allExchangePairs = append(
-				allExchangePairs,
-				BinaryExchangePair{
-					input:  nlp.Tokenize(doc["input"].(string)),
-					output: nlp.Tokenize(doc["output"].(string)),
-				},
-			)
-
-		}
-
-	}
-
-	return &BinaryExchangeBank{data: allExchangePairs}
-}
-
-func (bank *BinaryExchangeBank) Process(machine *Machine) []Expression {
-
-	newExps := make([]Expression, 0)
-
-	for id, tokenizedText := range machine.findUnmatchedTokenizedText() {
-
-		response, err := bank.findResponse(tokenizedText.Data["text"].([]string))
-
-		if err == nil {
-			newExps = append(newExps, BuildResponseFromBinary(id, response))
-		}
-
+	for _, sig := range unmatchedPlainText {
+		newExps = bank.processPlainText(sig)
 	}
 
 	return newExps
 
 }
 
-func (bank *BinaryExchangeBank) findResponse(query []string) ([]string, error) {
+func (bank *BinaryExchangeBlock) processPlainText(signal Signal) []Signal {
 
-	matchFound := false
-	var resp []string
+	ans := make([]Signal, 0)
+	tokenizedInput := nlp.Tokenize(signal.Text)
+	resp, err := bank.prebuilt.FindResponse(tokenizedInput)
 
-	for _, pair := range bank.data {
-		if pair.matchesInput(query) {
-
-			resp = pair.output
-			matchFound = true
-			break
-
-		}
+	if err == nil {
+		ans = append(ans, BuildBinaryResponse(signal.ID, resp))
 	}
 
-	if !matchFound {
-		return nil, fmt.Errorf("No match found for input: %s", query)
-	}
-
-	return resp, nil
+	return ans
 
 }

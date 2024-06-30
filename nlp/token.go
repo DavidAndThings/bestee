@@ -1,18 +1,12 @@
 package nlp
 
 import (
-	"bestee/info"
 	"strings"
-
-	"go.uber.org/zap"
 )
-
-var logger, _ = zap.NewProduction()
-var sugarLogger = logger.Sugar()
 
 func Tokenize(text string) []string {
 
-	tokenDb := info.GetTokenDatabaseInstance()
+	tokenDb := GetTokenDatabaseInstance()
 	upperBound := len(text) + 1
 	scores := make([]float64, upperBound)
 	breakPoints := make([][]int, upperBound)
@@ -49,13 +43,6 @@ func Tokenize(text string) []string {
 	finalBreakPoints := append(breakPoints[upperBound-1], upperBound-1)
 	tokens := extractTokensFromBreakPoints(text, finalBreakPoints)
 	cleanTokens := cleanTokens(tokens)
-
-	sugarLogger.Infow(
-		"Tokenization Summary",
-		"Scores", scores,
-		"Break_Points", breakPoints[upperBound-1],
-		"Tokens", cleanTokens,
-	)
 
 	return cleanTokens
 

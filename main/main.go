@@ -20,8 +20,7 @@ func NewBestee() *Bestee {
 func (bestee *Bestee) GetMachine() *core.Machine {
 
 	return core.NewMachineWithLogicBlocks(
-		core.GetEntityBankInstance(),
-		core.GetBinaryExchangeBankInstance(),
+		core.NewBinaryExchangeBlock(),
 	)
 
 }
@@ -41,7 +40,7 @@ func (bestee *Bestee) machineLoop() {
 		select {
 		case keyboardInput := <-bestee.keyboardInput:
 
-			machine.AddToSignalQueue(core.BuildTokenizedText(keyboardInput))
+			machine.AddToSignalQueue(core.BuildPlainText(keyboardInput))
 			machine.RunEpoch()
 
 		}
@@ -66,5 +65,7 @@ func main() {
 
 	bestee := NewBestee()
 	bestee.Run()
+	//blk := core.NewBinaryExchangeBlock()
+	//fmt.Println(blk)
 
 }

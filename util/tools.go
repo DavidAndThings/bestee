@@ -4,50 +4,12 @@ import (
 	"bufio"
 	"crypto/md5"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"math"
 	"os"
 	"path/filepath"
 	"strconv"
 )
-
-func ReadJsonIntoMap(filePath string) map[string]interface{} {
-	jsonBytes, err := os.ReadFile(filePath)
-
-	if err != nil {
-		fmt.Println(err)
-	}
-
-	var jsonData map[string]interface{} = make(map[string]interface{})
-	jsonErr := json.Unmarshal(jsonBytes, &jsonData)
-
-	if jsonErr != nil {
-		fmt.Println(jsonErr)
-	}
-
-	return jsonData
-
-}
-
-func ReadJsonIntoArray(filePath string) []map[string]interface{} {
-
-	jsonBytes, err := os.ReadFile(filePath)
-
-	if err != nil {
-		fmt.Println(err)
-	}
-
-	var jsonData []map[string]interface{} = make([]map[string]interface{}, 0)
-	jsonErr := json.Unmarshal(jsonBytes, &jsonData)
-
-	if jsonErr != nil {
-		fmt.Println(jsonErr)
-	}
-
-	return jsonData
-
-}
 
 func GetExcutableDir() string {
 
@@ -63,7 +25,7 @@ func GetExcutableDir() string {
 func ReadConfigJson() map[string]interface{} {
 
 	exeDir := GetExcutableDir()
-	return ReadJsonIntoMap(exeDir + "/config.json")
+	return ReadJsonIntoObject[map[string]interface{}](exeDir + "/config.json")
 
 }
 
@@ -144,13 +106,5 @@ func DotProduct(a []float64, b []float64) float64 {
 }
 
 func Magnitude(a []float64) float64 {
-
-	ans := 0.0
-
-	for _, val := range a {
-		ans += val * val
-	}
-
-	return math.Sqrt(ans)
-
+	return math.Sqrt(DotProduct(a, a))
 }
