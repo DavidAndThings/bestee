@@ -6,7 +6,7 @@ import (
 )
 
 type BinaryExchangeBlock struct {
-	entities *info.EntityBank
+	entities *info.ObjectBank
 	prebuilt *info.PrebuiltExchangeBank
 }
 
@@ -39,7 +39,7 @@ func (bank *BinaryExchangeBlock) processPlainText(signal Signal) []Signal {
 	resp, err := bank.prebuilt.FindResponse(tokenizedInput)
 
 	if err == nil {
-		ans = append(ans, BuildBinaryResponse(signal.ID, resp))
+		ans = append(ans, BuildBinaryResponse(signal.ID, resp.Output))
 	}
 
 	return ans

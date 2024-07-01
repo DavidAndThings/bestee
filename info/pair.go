@@ -19,12 +19,14 @@ func (t TokenArray) MarshalJSON() ([]byte, error) {
 	return json.Marshal(strings.Join(t, " "))
 }
 
-type exchangePair struct {
-	Input  TokenArray `json:"input"`
-	Output TokenArray `json:"output"`
+type ExchangePair struct {
+	Input      TokenArray `json:"input"`
+	Output     TokenArray `json:"output"`
+	SourceType string     `json:"source_type"`
+	SourceID   string
 }
 
-func (pair exchangePair) matchScore(query []string) float64 {
+func (pair ExchangePair) matchScore(query []string) float64 {
 	return nlp.GlobalSequencePairAlign(pair.Input, query).Score
 }
 
@@ -32,9 +34,9 @@ type pairMatcher struct {
 }
 
 func (matcher *pairMatcher) pickBestMatch(
-	query []string, exchangePairs []exchangePair) ([]string, error) {
+	query []string, exchangePairs []ExchangePair) (ExchangePair, error) {
 
-	var bestMatch exchangePair
+	var bestMatch ExchangePair
 	highestScore := math.Inf(-1)
 
 	for _, pair := range exchangePairs {
@@ -46,6 +48,6 @@ func (matcher *pairMatcher) pickBestMatch(
 		}
 	}
 
-	return bestMatch.Output, nil
+	return bestMatch, nil
 
 }

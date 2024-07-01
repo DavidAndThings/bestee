@@ -3,6 +3,7 @@ package main
 import (
 	"bestee/core"
 	"bufio"
+	"fmt"
 	"os"
 	"strings"
 )
@@ -51,6 +52,7 @@ func (bestee *Bestee) keyboardInputLoop() {
 
 	for {
 
+		fmt.Print("> ")
 		reader := bufio.NewReader(os.Stdin)
 		text, _ := reader.ReadString('\n')
 		trimmedText := strings.Trim(text, "\n")
@@ -65,7 +67,5 @@ func main() {
 
 	bestee := NewBestee()
 	bestee.Run()
-	//blk := core.NewBinaryExchangeBlock()
-	//fmt.Println(blk)
 
 }

@@ -15,6 +15,6 @@ func (person *person) HashStr() string {
 	return person.ID
 }
 
-func (person *person) computeExchangePairs(bank *EntityBank) []exchangePair {
-	return make([]exchangePair, 0)
+func (person *person) computeExchangePairs(bank *ObjectBank) []ExchangePair {
+	return make([]ExchangePair, 0)
 }

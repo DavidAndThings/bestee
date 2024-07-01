@@ -1,10 +1,12 @@
 [
   {
     "input": "hello world",
-    "output": "hey, hey"
+    "output": "hey, hey",
+    "source_type": "prebuilt"
   },
   {
     "input": "What is your name?",
-    "output": "My name is Xiao Wang"
+    "output": "My name is Xiao Wang",
+    "source_type": "prebuilt"
   }
 ]

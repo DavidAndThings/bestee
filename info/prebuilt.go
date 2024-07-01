@@ -8,7 +8,7 @@ var prebuiltExchangeBankInstance *PrebuiltExchangeBank
 
 type PrebuiltExchangeBank struct {
 	*pairMatcher
-	data []exchangePair
+	data []ExchangePair
 }
 
 func GetPrebuiltExchangeBankInstance() *PrebuiltExchangeBank {
@@ -26,13 +26,13 @@ func newBinaryExchangeBank() *PrebuiltExchangeBank {
 	exePath := util.GetExcutableDir()
 	config := util.ReadConfigJson()
 
-	allExchangePairs := make([]exchangePair, 0)
+	allExchangePairs := make([]ExchangePair, 0)
 
 	for _, partialPath := range config["prebuilt_exchange_pairs"].([]interface{}) {
 
 		filePath := exePath + partialPath.(string)
 
-		for _, pair := range util.ReadJsonIntoArrayOfObjects[exchangePair](filePath) {
+		for _, pair := range util.ReadJsonIntoArrayOfObjects[ExchangePair](filePath) {
 			allExchangePairs = append(allExchangePairs, pair)
 		}
 
@@ -44,6 +44,6 @@ func newBinaryExchangeBank() *PrebuiltExchangeBank {
 	}
 }
 
-func (bank *PrebuiltExchangeBank) FindResponse(query []string) ([]string, error) {
+func (bank *PrebuiltExchangeBank) FindResponse(query []string) (ExchangePair, error) {
 	return bank.pickBestMatch(query, bank.data)
 }

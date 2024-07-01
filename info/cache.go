@@ -7,6 +7,6 @@ type refLookAsideCache struct {
 	other  []string
 }
 
-func (cache *refLookAsideCache) computeExchangePairs(bank *EntityBank) []exchangePair {
-	return make([]exchangePair, 0)
+func (cache *refLookAsideCache) computeExchangePairs(bank *ObjectBank) []ExchangePair {
+	return make([]ExchangePair, 0)
 }

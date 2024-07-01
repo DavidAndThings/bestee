@@ -5,15 +5,15 @@ import (
 	"fmt"
 )
 
-var entityBankInstance *EntityBank
+var entityBankInstance *ObjectBank
 
-type EntityBank struct {
+type ObjectBank struct {
 	*pairMatcher
 	cache  *refLookAsideCache
 	people *util.HashSet[*person]
 }
 
-func GetEntityBankInstance() *EntityBank {
+func GetEntityBankInstance() *ObjectBank {
 
 	if entityBankInstance == nil {
 		entityBankInstance = newEntityBank()
@@ -23,7 +23,7 @@ func GetEntityBankInstance() *EntityBank {
 
 }
 
-func newEntityBank() *EntityBank {
+func newEntityBank() *ObjectBank {
 
 	exePath := util.GetExcutableDir()
 	config := util.ReadConfigJson()
@@ -37,7 +37,7 @@ func newEntityBank() *EntityBank {
 
 	}
 
-	return &EntityBank{
+	return &ObjectBank{
 		pairMatcher: &pairMatcher{},
 		cache:       &refLookAsideCache{},
 		people:      allPeople,
@@ -45,19 +45,20 @@ func newEntityBank() *EntityBank {
 
 }
 
-func (bank *EntityBank) FindResponse(query []string) ([]string, error) {
+func (bank *ObjectBank) FindResponse(query []string) (ExchangePair, error) {
 
+	var resp ExchangePair
 	allPairs := bank.getAvailableExchangePairs()
 
 	if len(allPairs) == 0 {
-		return nil, fmt.Errorf("No exchange pair is available!")
+		return resp, fmt.Errorf("No exchange pair is available!")
 	}
 
 	return bank.pickBestMatch(query, allPairs)
 
 }
 
-func (bank *EntityBank) getAvailableExchangePairs() []exchangePair {
+func (bank *ObjectBank) getAvailableExchangePairs() []ExchangePair {
 
 	allPairs := bank.cache.computeExchangePairs(bank)
 
