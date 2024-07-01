@@ -22,18 +22,18 @@ type AnnotatedTokens struct {
 	Annotations *util.HashSet[Annotation]
 }
 
-func NewAnnotatedTokens(tokens []string) *AnnotatedTokens {
+func NewAnnotatedTokens(text string) *AnnotatedTokens {
 	return &AnnotatedTokens{
-		Tokens:      tokens,
+		Tokens:      Tokenize(text),
 		Annotations: util.NewHashSet[Annotation](),
 	}
 }
 
-func (tokens *AnnotatedTokens) HasAnnotationAt(start, end int, value string) bool {
+func (self *AnnotatedTokens) HasAnnotationAt(start, end int, value string) bool {
 
 	ans := false
 
-	for _, annotation := range tokens.Annotations.Values() {
+	for _, annotation := range self.Annotations.Values() {
 
 		if annotation.StartIndex == start &&
 			annotation.EndIndex == end && annotation.Value == value {
@@ -47,14 +47,18 @@ func (tokens *AnnotatedTokens) HasAnnotationAt(start, end int, value string) boo
 
 }
 
-func (tokens *AnnotatedTokens) AddAnnotations(annotations ...Annotation) {
-	tokens.Annotations.AddAll(annotations...)
+func (self *AnnotatedTokens) AddAnnotations(annotations ...Annotation) {
+	self.Annotations.AddAll(annotations...)
 }
 
-func (tokens *AnnotatedTokens) HasTopAnnotation(value string) bool {
-	return tokens.HasAnnotationAt(0, tokens.Size(), value)
+func (self *AnnotatedTokens) HasTopAnnotation(value string) bool {
+	return self.HasAnnotationAt(0, self.Size(), value)
 }
 
-func (tokens *AnnotatedTokens) Size() int {
-	return len(tokens.Tokens)
+func (self *AnnotatedTokens) Size() int {
+	return len(self.Tokens)
+}
+
+func (self *AnnotatedTokens) AlignWith(other *AnnotatedTokens) GlobalAlignmentResult {
+	return GlobalSequencePairAlign(self.Tokens, other.Tokens)
 }
