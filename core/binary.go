@@ -2,7 +2,6 @@ package core
 
 import (
 	"bestee/info"
-	"bestee/nlp"
 )
 
 type BinaryExchangeBlock struct {
@@ -22,7 +21,7 @@ func NewBinaryExchangeBlock() *BinaryExchangeBlock {
 func (bank *BinaryExchangeBlock) Process(memory *Memory) []Signal {
 
 	newExps := make([]Signal, 0)
-	unmatchedPlainText := memory.runQuery(findUnmatchedPlainText)
+	unmatchedPlainText := memory.runQuery(findUnmatchedAnnotatedText)
 
 	for _, sig := range unmatchedPlainText {
 		newExps = bank.processPlainText(sig)
@@ -35,8 +34,7 @@ func (bank *BinaryExchangeBlock) Process(memory *Memory) []Signal {
 func (bank *BinaryExchangeBlock) processPlainText(signal Signal) []Signal {
 
 	ans := make([]Signal, 0)
-	tokenizedInput := nlp.Tokenize(signal.Text)
-	resp, err := bank.prebuilt.FindResponse(tokenizedInput)
+	resp, err := bank.prebuilt.FindResponse(signal.Text)
 
 	if err == nil {
 		ans = append(ans, BuildBinaryResponse(signal.ID, resp.Output))

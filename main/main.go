@@ -41,7 +41,7 @@ func (bestee *Bestee) machineLoop() {
 		select {
 		case keyboardInput := <-bestee.keyboardInput:
 
-			machine.AddToSignalQueue(core.BuildPlainText(keyboardInput))
+			machine.AddToSignalQueue(core.BuildAnnotatedText(keyboardInput))
 			machine.RunEpoch()
 
 		}

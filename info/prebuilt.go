@@ -1,6 +1,7 @@
 package info
 
 import (
+	"bestee/nlp"
 	"bestee/util"
 )
 
@@ -44,6 +45,7 @@ func newBinaryExchangeBank() *PrebuiltExchangeBank {
 	}
 }
 
-func (bank *PrebuiltExchangeBank) FindResponse(query []string) (ExchangePair, error) {
+func (bank *PrebuiltExchangeBank) FindResponse(
+	query *nlp.AnnotatedTextSequence) (ExchangePair, error) {
 	return bank.pickBestMatch(query, bank.data)
 }

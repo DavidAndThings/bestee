@@ -3,6 +3,7 @@ package core
 import (
 	"bestee/util"
 	"fmt"
+	"strings"
 
 	"go.uber.org/zap"
 )
@@ -45,6 +46,6 @@ func (mach *Machine) RunEpoch() {
 func (mach *Machine) processSignal(signal Signal) {
 	switch signal.Type {
 	case BINARY_RESPONSE:
-		fmt.Println(signal.Text)
+		fmt.Println(strings.Join(signal.Text.Tokens, " "))
 	}
 }

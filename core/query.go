@@ -2,14 +2,14 @@ package core
 
 import "bestee/util"
 
-func findUnmatchedPlainText(mem *Memory) []Signal {
+func findUnmatchedAnnotatedText(mem *Memory) []Signal {
 
 	storage := util.NewHashSet[Signal]()
 
 	for _, sig := range mem.shortTerm {
 
 		switch sig.Type {
-		case PLAIN_TEXT:
+		case ANNOTATED_TEXT:
 			storage.Add(sig)
 		case BINARY_RESPONSE:
 

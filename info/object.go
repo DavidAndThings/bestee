@@ -1,6 +1,7 @@
 package info
 
 import (
+	"bestee/nlp"
 	"bestee/util"
 	"fmt"
 )
@@ -45,7 +46,7 @@ func newEntityBank() *ObjectBank {
 
 }
 
-func (bank *ObjectBank) FindResponse(query []string) (ExchangePair, error) {
+func (bank *ObjectBank) FindResponse(query *nlp.AnnotatedTextSequence) (ExchangePair, error) {
 
 	var resp ExchangePair
 	allPairs := bank.getAvailableExchangePairs()

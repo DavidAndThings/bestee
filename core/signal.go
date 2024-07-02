@@ -1,12 +1,12 @@
 package core
 
 import (
-	"strings"
+	"bestee/nlp"
 
 	"github.com/google/uuid"
 )
 
-const PLAIN_TEXT = "PLAIN_TEXT"
+const ANNOTATED_TEXT = "ANNOTATED_TEXT"
 const BINARY_RESPONSE = "BINARY_RESPONSE"
 
 type Signal struct {
@@ -15,29 +15,29 @@ type Signal struct {
 	From string
 	To   string
 	For  string
-	Text string
+	Text *nlp.AnnotatedTextSequence
 }
 
 func (signal Signal) HashStr() string {
 	return signal.ID
 }
 
-func BuildPlainText(text string) Signal {
+func BuildAnnotatedText(text string) Signal {
 
 	return Signal{
-		Type: PLAIN_TEXT,
+		Type: ANNOTATED_TEXT,
 		ID:   uuid.New().String(),
-		Text: text,
+		Text: nlp.NewAnnotatedTextSequence(text),
 	}
 
 }
 
-func BuildBinaryResponse(respFor string, resp []string) Signal {
+func BuildBinaryResponse(respFor string, resp *nlp.AnnotatedTextSequence) Signal {
 
 	return Signal{
 		Type: BINARY_RESPONSE,
 		For:  respFor,
-		Text: strings.Join(resp, " "),
+		Text: resp,
 	}
 
 }
