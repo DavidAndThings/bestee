@@ -23,8 +23,7 @@ htmlcov/
 # Ruff
 .ruff_cache/
 
-# SIC user cache (generated at runtime)
-src/bestee/_sic_cache_user.json
+
 
 # IDE
 .idea/

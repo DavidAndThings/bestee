@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 
 from great_tables import GT
 
-from bestee.sic import _load_cache, _strip_html, get_sic_codes
+from bestee.sic import _load_bundled_cache, _strip_html, get_sic_codes
 
 _SAMPLE_HTML = """
 <html><body>
@@ -140,14 +140,9 @@ class TestGetSicCodes:
 
 
 class TestLoadCache:
-    @patch("bestee.sic._USER_CACHE")
-    def test_loads_bundled_cache(self, mock_user_cache: MagicMock) -> None:
-        """The bundled _sic_cache.json should be loadable."""
-        # Make the user cache appear non-existent so we fall through
-        # to the bundled cache.
-        mock_user_cache.is_file.return_value = False
-
-        rows = _load_cache()
+    def test_loads_bundled_cache(self) -> None:
+        """The bundled sic_codes.json should be loadable via importlib.resources."""
+        rows = _load_bundled_cache()
 
         assert rows is not None
         assert len(rows) > 400

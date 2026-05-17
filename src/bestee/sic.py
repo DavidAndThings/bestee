@@ -1,14 +1,18 @@
 """Scrape SIC codes and descriptions from the SEC website."""
 
 import html
+import importlib.resources
 import json
 import logging
 import re
 from pathlib import Path
 
 import httpx
+import platformdirs
 import polars as pl
 from great_tables import GT
+
+import bestee.resources
 
 logger = logging.getLogger(__name__)
 
@@ -31,12 +35,10 @@ _ROW_RE = re.compile(
     re.DOTALL,
 )
 
-# Bundled fallback cache shipped with the package.
-_BUNDLED_CACHE = Path(__file__).parent / "_sic_cache.json"
-
-# User-level cache written after a successful scrape so subsequent
-# calls don't hit the network.
-_USER_CACHE = Path(__file__).parent / "_sic_cache_user.json"
+# User-level cache directory following OS conventions
+# (e.g. ~/Library/Caches/bestee on macOS, ~/.cache/bestee on Linux).
+_USER_CACHE_DIR = Path(platformdirs.user_cache_dir("bestee"))
+_USER_CACHE = _USER_CACHE_DIR / "sic_codes.json"
 
 
 # ── Internal helpers ─────────────────────────────────────────────────
@@ -88,29 +90,48 @@ def _scrape_sic_codes() -> list[dict[str, str]]:
 
 
 def _save_cache(rows: list[dict[str, str]]) -> None:
-    """Persist scraped data to the user cache file."""
+    """Persist scraped data to the user cache directory."""
     try:
+        _USER_CACHE_DIR.mkdir(parents=True, exist_ok=True)
         _USER_CACHE.write_text(json.dumps(rows, indent=2))
         logger.debug("Saved %d SIC codes to %s", len(rows), _USER_CACHE)
     except OSError:
         logger.warning("Failed to write SIC cache to %s", _USER_CACHE)
 
 
+def _load_bundled_cache() -> list[dict[str, str]] | None:
+    """Load the SIC snapshot bundled with the package via importlib.resources."""
+    try:
+        ref = importlib.resources.files(bestee.resources).joinpath("sic_codes.json")
+        data: list[dict[str, str]] = json.loads(ref.read_text(encoding="utf-8"))
+        logger.info("Loaded %d SIC codes from bundled cache", len(data))
+        return data
+    except OSError, json.JSONDecodeError:
+        logger.warning("Failed to read bundled SIC cache")
+        return None
+
+
 def _load_cache() -> list[dict[str, str]] | None:
     """Load SIC data from the user cache, falling back to the bundled cache.
 
     Returns:
-        The cached rows, or *None* if no cache file exists.
+        The cached rows, or *None* if no cache is available.
     """
-    for path in (_USER_CACHE, _BUNDLED_CACHE):
-        if path.is_file():
-            try:
-                data: list[dict[str, str]] = json.loads(path.read_text())
-                logger.info("Loaded %d SIC codes from cache (%s)", len(data), path.name)
-                return data
-            except OSError, json.JSONDecodeError:
-                logger.warning("Failed to read cache at %s", path)
-    return None
+    # 1. Try user cache (from a previous successful scrape).
+    if _USER_CACHE.is_file():
+        try:
+            data: list[dict[str, str]] = json.loads(
+                _USER_CACHE.read_text(encoding="utf-8")
+            )
+            logger.info(
+                "Loaded %d SIC codes from user cache (%s)", len(data), _USER_CACHE
+            )
+            return data
+        except OSError, json.JSONDecodeError:
+            logger.warning("Failed to read user cache at %s", _USER_CACHE)
+
+    # 2. Fall back to the bundled snapshot.
+    return _load_bundled_cache()
 
 
 # ── Public API ───────────────────────────────────────────────────────
