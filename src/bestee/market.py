@@ -1,12 +1,15 @@
 """Market-wide snapshot data from the Massive API."""
 
 import datetime as dt
+import logging
 
 import polars as pl
 from great_tables import GT
 from massive.rest.models import GroupedDailyAgg, TickerSnapshot
 
 from bestee.client import get_client
+
+logger = logging.getLogger(__name__)
 
 _US_EASTERN = dt.timezone(dt.timedelta(hours=-4))
 
@@ -48,6 +51,12 @@ def get_market_snapshot(
     Raises:
         RuntimeError: If no API key is available.
     """
+    logger.info(
+        "Fetching market snapshot for %s (adjusted=%s, include_otc=%s)",
+        date,
+        adjusted,
+        include_otc,
+    )
     client = get_client(api_key)
 
     results = client.get_grouped_daily_aggs(
@@ -77,6 +86,8 @@ def get_market_snapshot(
             }
         )
 
+    logger.info("Collected %d tickers for %s", len(rows), date)
+
     if not rows:
         schema: dict[str, type[pl.DataType]] = {"Ticker": pl.Utf8}  # type: ignore[assignment]
         for name in _BASE_FIELDS:
@@ -91,6 +102,7 @@ def get_market_snapshot(
     price_cols = [_col(c) for c in ("Open", "High", "Low", "Close", "VWAP")]
     volume_cols = [_col(c) for c in ("Volume", "Transactions")]
 
+    logger.info("Built market snapshot GT table for %s", date)
     return (
         GT(df)
         .tab_header(
@@ -117,7 +129,12 @@ def _trading_date_from_snapshots(
     for snap in snapshots:
         if isinstance(snap, TickerSnapshot) and snap.updated is not None:
             ts = dt.datetime.fromtimestamp(int(snap.updated) / 1e9, tz=_US_EASTERN)
+            logger.debug(
+                "Derived trading date %s from snapshot timestamp",
+                ts.strftime("%Y-%m-%d"),
+            )
             return ts.strftime("%Y-%m-%d")
+    logger.warning("Could not derive trading date from snapshots")
     return "unknown"
 
 
@@ -149,6 +166,7 @@ def get_latest_market_snapshot(
     Raises:
         RuntimeError: If no API key is available.
     """
+    logger.info("Fetching latest market snapshot (include_otc=%s)", include_otc)
     client = get_client(api_key)
 
     result = client.get_snapshot_all(
@@ -156,8 +174,10 @@ def get_latest_market_snapshot(
         include_otc=include_otc,
     )
     snapshots: list[TickerSnapshot] = result if isinstance(result, list) else []
+    logger.info("Received %d snapshots from API", len(snapshots))
 
     trading_date = _trading_date_from_snapshots(snapshots)
+    logger.info("Trading date: %s", trading_date)
 
     def _col(name: str) -> str:
         return f"{name} ({trading_date})"
@@ -181,6 +201,8 @@ def get_latest_market_snapshot(
             }
         )
 
+    logger.info("Collected %d tickers with day data", len(rows))
+
     if not rows:
         df = pl.DataFrame(
             schema={
@@ -199,6 +221,7 @@ def get_latest_market_snapshot(
     price_cols = [_col(c) for c in ("Open", "High", "Low", "Close", "VWAP")]
     volume_col = _col("Volume")
 
+    logger.info("Built latest market snapshot GT table")
     return (
         GT(df)
         .tab_header(

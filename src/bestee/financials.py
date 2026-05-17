@@ -1,5 +1,6 @@
 """Build a financial-metrics comparison table from the Massive API."""
 
+import logging
 from collections import defaultdict
 from collections.abc import Iterator
 from typing import Any
@@ -10,6 +11,8 @@ from massive import RESTClient
 
 from bestee.client import get_client
 from bestee.models import FinancialMetric, StatementType
+
+logger = logging.getLogger(__name__)
 
 # ── Types used as grouping keys ──────────────────────────────────────
 
@@ -75,6 +78,7 @@ def _group_metrics(
         else:
             key: _PeriodKey = (m.statement, m.fiscal_year, m.fiscal_quarter)
             groups[key].append(m)
+    logger.debug("Grouped %d metrics into %d API call(s)", len(metrics), len(groups))
     return dict(groups)
 
 
@@ -133,6 +137,7 @@ def _fetch_statement(
         kwargs["fiscal_quarter"] = fiscal_quarter
         kwargs["timeframe"] = "quarterly"
 
+    logger.info("Calling %s for %s", method_name, tickers_csv)
     return method(**kwargs)
 
 
@@ -171,8 +176,14 @@ def build_financials_table(
     Raises:
         RuntimeError: If no API key is available.
     """
+    logger.info(
+        "Building financials table for %d tickers with %d metrics",
+        len(tickers),
+        len(metrics),
+    )
     client = get_client(api_key)
     groups = _group_metrics(metrics)
+    logger.info("Metrics grouped into %d API call(s)", len(groups))
     requested = set(tickers)
     tickers_csv = ",".join(tickers)
 
@@ -183,6 +194,7 @@ def build_financials_table(
 
     for key, group_metrics in groups.items():
         results = list(_fetch_statement(client, key, tickers_csv))
+        logger.debug("Statement %s returned %d results", key, len(results))
         # Sort newest-first so the first hit per ticker is the latest.
         results.sort(key=_period_sort_key, reverse=True)
 
@@ -195,11 +207,16 @@ def build_financials_table(
             if ticker is None or ticker in seen:
                 continue
             seen.add(ticker)
+            logger.debug("Extracted data for ticker %s from %s", ticker, key)
 
             for m in group_metrics:
                 value = getattr(result, m.field, None)
                 if value is not None:
                     data[ticker][m.label] = float(value)
+
+    logger.info(
+        "Built financials GT table: %d tickers × %d metrics", len(tickers), len(metrics)
+    )
 
     # Build a Polars DataFrame preserving the caller's ticker order.
     rows = [{"Ticker": t, **data[t]} for t in tickers]

@@ -1,10 +1,14 @@
 """Fetch all tickers from the Massive (formerly Polygon.io) API."""
 
+import logging
+
 import polars as pl
 from great_tables import GT
 from massive.rest.models import Ticker, TickerDetails
 
 from bestee.client import get_client
+
+logger = logging.getLogger(__name__)
 
 # Fields to extract from TickerDetails, in display order.
 # Each tuple is (attribute_name, column_label).
@@ -63,6 +67,9 @@ def _fetch_tickers(
         RuntimeError: If no API key is available.
     """
     client = get_client(api_key)
+    logger.info(
+        "Fetching tickers (market=%s, type=%s, active=%s)", market, ticker_type, active
+    )
 
     tickers: list[Ticker] = []
     for ticker in client.list_tickers(
@@ -74,6 +81,7 @@ def _fetch_tickers(
         if isinstance(ticker, Ticker):
             tickers.append(ticker)
 
+    logger.info("Fetched %d tickers", len(tickers))
     return tickers
 
 
@@ -109,6 +117,12 @@ def get_all_tickers(
     Raises:
         RuntimeError: If no API key is available.
     """
+    logger.info(
+        "Building all-tickers table (market=%s, type=%s, active=%s)",
+        market,
+        ticker_type,
+        active,
+    )
     tickers = _fetch_tickers(
         api_key=api_key,
         market=market,
@@ -132,6 +146,7 @@ def get_all_tickers(
         ]
     )
 
+    logger.info("Built GT table with %d tickers", len(tickers))
     return (
         GT(df)
         .tab_header(
@@ -165,13 +180,17 @@ def get_ticker_details(
     Raises:
         RuntimeError: If no API key is available.
     """
+    logger.info("Fetching details for %d tickers: %s", len(tickers), tickers)
     client = get_client(api_key)
 
     details: list[TickerDetails] = []
     for symbol in tickers:
         result = client.get_ticker_details(symbol)
+        logger.debug("Fetched details for %s", symbol)
         if isinstance(result, TickerDetails):
             details.append(result)
+
+    logger.info("Retrieved details for %d/%d tickers", len(details), len(tickers))
 
     # One row per ticker, one column per detail field.
     rows: list[dict[str, str | None]] = []
@@ -193,6 +212,7 @@ def get_ticker_details(
 
     detail_cols = [label for _, label in _DETAIL_FIELDS]
 
+    logger.info("Built ticker details GT table")
     return (
         GT(df)
         .tab_header(
