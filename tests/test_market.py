@@ -3,9 +3,9 @@
 from unittest.mock import MagicMock, patch
 
 from great_tables import GT
-from massive.rest.models import GroupedDailyAgg
+from massive.rest.models import Agg, GroupedDailyAgg, TickerSnapshot
 
-from bestee.market import get_market_snapshot
+from bestee.market import get_latest_market_snapshot, get_market_snapshot
 
 _CLIENT_PATCH = "bestee.market.get_client"
 
@@ -138,3 +138,146 @@ class TestGetMarketSnapshot:
             adjusted=False,
             include_otc=True,
         )
+
+
+# ── Helpers for get_latest_market_snapshot ─────────────────────────
+
+
+# A fixed nanosecond timestamp for 2025-07-18 14:00 UTC (10:00 ET).
+_FAKE_UPDATED_NS = 1_752_847_200_000_000_000
+
+
+def _make_snapshot(
+    ticker: str = "AAPL",
+    *,
+    day_open: float = 190.0,
+    day_high: float = 195.0,
+    day_low: float = 189.0,
+    day_close: float = 194.0,
+    day_volume: float = 50_000_000.0,
+    day_vwap: float = 192.5,
+    updated: int = _FAKE_UPDATED_NS,
+) -> MagicMock:
+    """Create a mock TickerSnapshot with a day Agg."""
+    day = MagicMock(spec=Agg)
+    day.open = day_open
+    day.high = day_high
+    day.low = day_low
+    day.close = day_close
+    day.volume = day_volume
+    day.vwap = day_vwap
+
+    snap = MagicMock(spec=TickerSnapshot)
+    snap.ticker = ticker
+    snap.day = day
+    snap.updated = updated
+    return snap
+
+
+class TestGetLatestMarketSnapshot:
+    @patch(_CLIENT_PATCH)
+    def test_returns_gt_object(
+        self,
+        mock_get_client: MagicMock,
+    ) -> None:
+        mock_get_client.return_value.get_snapshot_all.return_value = [
+            _make_snapshot("AAPL"),
+        ]
+
+        result = get_latest_market_snapshot()
+
+        assert isinstance(result, GT)
+
+    @patch(_CLIENT_PATCH)
+    def test_single_api_call(
+        self,
+        mock_get_client: MagicMock,
+    ) -> None:
+        mock_get_client.return_value.get_snapshot_all.return_value = [
+            _make_snapshot("AAPL"),
+            _make_snapshot("MSFT"),
+        ]
+
+        get_latest_market_snapshot()
+
+        mock_get_client.return_value.get_snapshot_all.assert_called_once_with(
+            "stocks",
+            include_otc=False,
+        )
+
+    @patch(_CLIENT_PATCH)
+    def test_contains_day_ohlcv(
+        self,
+        mock_get_client: MagicMock,
+    ) -> None:
+        mock_get_client.return_value.get_snapshot_all.return_value = [
+            _make_snapshot("AAPL", day_open=190.0, day_close=194.0),
+        ]
+
+        html = get_latest_market_snapshot().as_raw_html()
+
+        assert "AAPL" in html
+        assert "190" in html
+        assert "194" in html
+
+    @patch(_CLIENT_PATCH)
+    def test_columns_include_trading_date(
+        self,
+        mock_get_client: MagicMock,
+    ) -> None:
+        """Column names should include the trading date from updated."""
+        mock_get_client.return_value.get_snapshot_all.return_value = [
+            _make_snapshot("AAPL"),
+        ]
+
+        html = get_latest_market_snapshot().as_raw_html()
+
+        assert "Open (2025-07-18)" in html
+        assert "Close (2025-07-18)" in html
+        assert "Volume (2025-07-18)" in html
+
+    @patch(_CLIENT_PATCH)
+    def test_sorted_by_ticker(
+        self,
+        mock_get_client: MagicMock,
+    ) -> None:
+        mock_get_client.return_value.get_snapshot_all.return_value = [
+            _make_snapshot("MSFT"),
+            _make_snapshot("AAPL"),
+            _make_snapshot("GOOG"),
+        ]
+
+        html = get_latest_market_snapshot().as_raw_html()
+
+        assert html.index("AAPL") < html.index("GOOG") < html.index("MSFT")
+
+    @patch(_CLIENT_PATCH)
+    def test_skips_snapshots_without_day(
+        self,
+        mock_get_client: MagicMock,
+    ) -> None:
+        no_day = MagicMock(spec=TickerSnapshot)
+        no_day.ticker = "BAD"
+        no_day.day = None
+        no_day.updated = _FAKE_UPDATED_NS
+
+        mock_get_client.return_value.get_snapshot_all.return_value = [
+            _make_snapshot("AAPL"),
+            no_day,
+        ]
+
+        html = get_latest_market_snapshot().as_raw_html()
+
+        assert "AAPL" in html
+        assert "BAD" not in html
+
+    @patch(_CLIENT_PATCH)
+    def test_empty_result(
+        self,
+        mock_get_client: MagicMock,
+    ) -> None:
+        mock_get_client.return_value.get_snapshot_all.return_value = []
+
+        result = get_latest_market_snapshot()
+
+        assert isinstance(result, GT)
