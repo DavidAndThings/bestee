@@ -4,9 +4,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from great_tables import GT
-from massive.rest.models import Ticker
+from massive.rest.models import Ticker, TickerDetails
 
-from bestee.tickers import _fetch_tickers, get_all_tickers
+from bestee.tickers import _fetch_tickers, get_all_tickers, get_ticker_details
 
 # Patch target for the client factory used by tickers.py
 _CLIENT_PATCH = "bestee.tickers.get_client"
@@ -134,3 +134,111 @@ class TestGetAllTickers:
         assert "GOOG" in html
         assert "Apple Inc." in html
         assert "Alphabet Inc." in html
+
+
+# ── Helpers for get_ticker_details ───────────────────────────────────
+
+
+def _make_fake_details(**kwargs: str | float | int | bool) -> MagicMock:
+    """Create a mock TickerDetails with sensible defaults."""
+    defaults: dict[str, str | float | int | bool] = {
+        "ticker": "AAPL",
+        "name": "Apple Inc.",
+        "description": "Apple designs consumer electronics.",
+        "type": "CS",
+        "market": "stocks",
+        "locale": "us",
+        "primary_exchange": "XNAS",
+        "currency_name": "usd",
+        "cik": "0000320193",
+        "composite_figi": "BBG000B9XRY4",
+        "share_class_figi": "BBG001S5N8V8",
+        "sic_code": "3571",
+        "sic_description": "ELECTRONIC COMPUTERS",
+        "market_cap": 4_400_000_000_000.0,
+        "share_class_shares_outstanding": 14_687_356_000,
+        "weighted_shares_outstanding": 14_687_356_000,
+        "total_employees": 166_000,
+        "list_date": "1980-12-12",
+        "homepage_url": "https://www.apple.com",
+        "phone_number": "(408) 996-1010",
+        "ticker_root": "AAPL",
+    }
+    defaults.update(kwargs)
+    mock = MagicMock(spec=TickerDetails)
+    for k, v in defaults.items():
+        setattr(mock, k, v)
+    return mock
+
+
+class TestGetTickerDetails:
+    """Tests for the get_ticker_details function."""
+
+    @patch(_CLIENT_PATCH)
+    def test_returns_gt_object(
+        self,
+        mock_get_client: MagicMock,
+    ) -> None:
+        """Should return a GT display table."""
+        mock_get_client.return_value.get_ticker_details.return_value = (
+            _make_fake_details(ticker="AAPL")
+        )
+
+        result = get_ticker_details(["AAPL"])
+
+        assert isinstance(result, GT)
+
+    @patch(_CLIENT_PATCH)
+    def test_one_call_per_ticker(
+        self,
+        mock_get_client: MagicMock,
+    ) -> None:
+        """Should call get_ticker_details once per ticker."""
+        mock_get_client.return_value.get_ticker_details.return_value = (
+            _make_fake_details()
+        )
+
+        get_ticker_details(["AAPL", "MSFT", "GOOG"])
+
+        assert mock_get_client.return_value.get_ticker_details.call_count == 3
+
+    @patch(_CLIENT_PATCH)
+    def test_contains_expected_fields(
+        self,
+        mock_get_client: MagicMock,
+    ) -> None:
+        """The HTML should contain key field values."""
+        mock_get_client.return_value.get_ticker_details.return_value = (
+            _make_fake_details(
+                ticker="AAPL",
+                name="Apple Inc.",
+                cik="0000320193",
+                sic_description="ELECTRONIC COMPUTERS",
+            )
+        )
+
+        result = get_ticker_details(["AAPL"])
+        html = result.as_raw_html()
+
+        assert "Apple Inc." in html
+        assert "0000320193" in html
+        assert "ELECTRONIC COMPUTERS" in html
+
+    @patch(_CLIENT_PATCH)
+    def test_multiple_tickers_as_columns(
+        self,
+        mock_get_client: MagicMock,
+    ) -> None:
+        """Each ticker should appear as a column header."""
+        mock_get_client.return_value.get_ticker_details.side_effect = [
+            _make_fake_details(ticker="AAPL", name="Apple Inc."),
+            _make_fake_details(ticker="MSFT", name="Microsoft Corporation"),
+        ]
+
+        result = get_ticker_details(["AAPL", "MSFT"])
+        html = result.as_raw_html()
+
+        assert "AAPL" in html
+        assert "MSFT" in html
+        assert "Apple Inc." in html
+        assert "Microsoft Corporation" in html

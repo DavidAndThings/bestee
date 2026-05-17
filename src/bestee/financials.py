@@ -211,7 +211,7 @@ def build_financials_table(
     periods = sorted({f"FY{m.fiscal_year} Q{m.fiscal_quarter}" for m in metrics})
 
     return (
-        GT(df, rowname_col="Ticker")
+        GT(df)
         .tab_header(
             title="Financial Metrics Comparison",
             subtitle=(
