@@ -4,6 +4,7 @@ import ast
 import logging
 import re
 from abc import ABC, abstractmethod
+from collections.abc import Sequence
 from typing import Any
 
 import polars as pl
@@ -16,8 +17,14 @@ from bestee.tickers import get_all_tickers, get_ticker_details
 
 logger = logging.getLogger(__name__)
 
+type Command = Sequence[str]
+
 
 class NoUpstreamError(Exception):
+    pass
+
+
+class ProcessingLevelError(Exception):
     pass
 
 
@@ -38,7 +45,7 @@ class TableDecorator(ABC):
         pass
 
 
-class BaseDecorator(TableDecorator):
+class TickerSummaryDecorator(TableDecorator):
     def __init__(
         self,
         ticker_type: str,
@@ -389,7 +396,7 @@ class ComputedMetricDecorator(TableDecorator):
             env = env_per_ticker.get(ticker, {})
             try:
                 value = self._evaluate(self._ast_tree, env)
-            except (TypeError, ZeroDivisionError, OverflowError):
+            except TypeError, ZeroDivisionError, OverflowError:
                 value = None
             computed.append(value)
 
@@ -413,3 +420,158 @@ class ComputedMetricDecorator(TableDecorator):
             )
             .sub_missing(missing_text="—")
         )
+
+
+_NUM_PROCESSING_LEVELS = 3
+
+
+def decorator_builder(commands: Sequence[Command]) -> TableDecorator:
+    """Build a chained :class:`TableDecorator` from a sequence of commands.
+
+    Commands are processed in three logical phases so that ordering in
+    the input is irrelevant:
+
+    * **Level 0** — ``STOCKS``, ``SAME_SIC_CATEGORY_AS``
+      (set up the base table and any filtering)
+    * **Level 1** — ``FINANCIAL_METRIC``
+      (accumulated into a single :class:`FinancialsDecorator` so the
+      financial-statement endpoints are called once per period)
+    * **Level 2** — ``COMPUTED_METRIC``
+      (each command becomes its own :class:`ComputedMetricDecorator`,
+      chained on top of the previous one)
+
+    Args:
+        commands: Each command is a sequence of whitespace-separated
+            tokens, where ``command[0]`` is the keyword.
+
+    Returns:
+        The outermost (final) decorator in the chain.
+
+    Raises:
+        ProcessingLevelError: If a command is unrecognized, or if a
+            dependent command appears without its required upstream
+            (e.g. ``COMPUTED_METRIC`` before any ``STOCKS``).
+    """
+    cmd_queue: list[Command] = [*commands]
+    decorator: TableDecorator | None = None
+
+    for level in range(_NUM_PROCESSING_LEVELS):
+        decorator, cmd_queue = decorator_builder_one_pass(cmd_queue, decorator, level)
+
+    if cmd_queue:
+        unknown = [cmd[0] for cmd in cmd_queue]
+        msg = f"Unrecognized command keyword(s): {unknown}"
+        raise ProcessingLevelError(msg)
+
+    if decorator is None:
+        msg = "No decorator was built — commands list produced nothing"
+        raise ProcessingLevelError(msg)
+
+    return decorator
+
+
+def decorator_builder_one_pass(
+    commands: Sequence[Command],
+    decorator: TableDecorator | None,
+    processing_level: int,
+) -> tuple[TableDecorator | None, list[Command]]:
+    """Run a single processing pass over *commands*.
+
+    Returns:
+        The (possibly updated) ``decorator`` plus the list of commands
+        that this level did not consume.
+    """
+    new_commands: list[Command] = []
+
+    # Level 1 accumulates FINANCIAL_METRIC commands into a single
+    # FinancialsDecorator so that downstream API calls are batched.
+    fin_decorator: FinancialsDecorator | None = None
+
+    for command in commands:
+        match processing_level:
+            case 0:
+                status, decorator = command_processor_level_zero(command, decorator)
+            case 1:
+                status, decorator, fin_decorator = command_processor_level_one(
+                    command, decorator, fin_decorator
+                )
+            case 2:
+                status, decorator = command_processor_level_two(command, decorator)
+            case _:
+                msg = f"Invalid processing level: {processing_level}"
+                raise ProcessingLevelError(msg)
+
+        if status == 0:
+            new_commands.append(command)
+
+    return decorator, new_commands
+
+
+def command_processor_level_zero(
+    command: Command,
+    decorator: TableDecorator | None,
+) -> tuple[int, TableDecorator | None]:
+    """Handle base-table commands (STOCKS, SAME_SIC_CATEGORY_AS)."""
+    match command[0]:
+        case "STOCKS":
+            return 1, TickerSummaryDecorator(ticker_type="CS")
+        case "SAME_SIC_CATEGORY_AS":
+            if decorator is None:
+                msg = "SAME_SIC_CATEGORY_AS requires an upstream (use STOCKS first)"
+                raise ProcessingLevelError(msg)
+            return 1, SameSICategoryDecorator(ticker=command[1], upstream=decorator)
+        case _:
+            return 0, decorator
+
+
+def command_processor_level_one(
+    command: Command,
+    decorator: TableDecorator | None,
+    fin_decorator: FinancialsDecorator | None,
+) -> tuple[int, TableDecorator | None, FinancialsDecorator | None]:
+    """Handle FINANCIAL_METRIC commands, accumulating into one decorator."""
+    match command[0]:
+        case "FINANCIAL_METRIC":
+            if fin_decorator is None:
+                if decorator is None:
+                    msg = "FINANCIAL_METRIC requires an upstream (use STOCKS first)"
+                    raise ProcessingLevelError(msg)
+                fin_decorator = FinancialsDecorator(upstream=decorator)
+                decorator = fin_decorator
+            try:
+                metric_enum = Metric[command[1]]
+            except KeyError as err:
+                msg = (
+                    f"Unknown FINANCIAL_METRIC name: {command[1]!r}. "
+                    f"Available: {sorted(m.name for m in Metric)}"
+                )
+                raise ProcessingLevelError(msg) from err
+            fin_decorator.add_metric(
+                FinancialMetric(
+                    metric=metric_enum,
+                    fiscal_year=int(command[2]),
+                    fiscal_quarter=int(command[3]),
+                )
+            )
+            return 1, decorator, fin_decorator
+        case _:
+            return 0, decorator, fin_decorator
+
+
+def command_processor_level_two(
+    command: Command,
+    decorator: TableDecorator | None,
+) -> tuple[int, TableDecorator | None]:
+    """Handle COMPUTED_METRIC commands, each as its own chained decorator."""
+    match command[0]:
+        case "COMPUTED_METRIC":
+            if decorator is None:
+                msg = "COMPUTED_METRIC requires an upstream (use STOCKS first)"
+                raise ProcessingLevelError(msg)
+            # The original whitespace-separated expression is rebuilt
+            # by joining the tokens with single spaces.  The DSL parser
+            # is tolerant of extra spaces (uses ``\s+``).
+            expression = " ".join(command)
+            return 1, ComputedMetricDecorator(upstream=decorator, expression=expression)
+        case _:
+            return 0, decorator
