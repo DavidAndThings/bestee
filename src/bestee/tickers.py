@@ -1,39 +1,42 @@
 """Fetch all tickers from the Massive (formerly Polygon.io) API."""
 
 import logging
+from concurrent.futures import ThreadPoolExecutor
 
 import polars as pl
 from great_tables import GT
+from massive import RESTClient
 from massive.rest.models import Ticker, TickerDetails
 
+from bestee import columns as cols
 from bestee.client import get_client
 
 logger = logging.getLogger(__name__)
 
 # Fields to extract from TickerDetails, in display order.
-# Each tuple is (attribute_name, column_label).
+# Each tuple is (attribute_name_on_SDK_model, column_label_in_table).
 _DETAIL_FIELDS: list[tuple[str, str]] = [
-    ("ticker", "Ticker"),
-    ("name", "Name"),
-    ("description", "Description"),
-    ("type", "Type"),
-    ("market", "Market"),
-    ("locale", "Locale"),
-    ("primary_exchange", "Primary Exchange"),
-    ("currency_name", "Currency"),
-    ("cik", "CIK"),
-    ("composite_figi", "Composite FIGI"),
-    ("share_class_figi", "Share Class FIGI"),
-    ("sic_code", "SIC Code"),
-    ("sic_description", "SIC Description"),
-    ("market_cap", "Market Cap"),
-    ("share_class_shares_outstanding", "Shares Outstanding"),
-    ("weighted_shares_outstanding", "Weighted Shares Outstanding"),
-    ("total_employees", "Total Employees"),
-    ("list_date", "List Date"),
-    ("homepage_url", "Homepage URL"),
-    ("phone_number", "Phone Number"),
-    ("ticker_root", "Ticker Root"),
+    ("ticker", cols.TICKER),
+    ("name", cols.NAME),
+    ("description", cols.DESCRIPTION),
+    ("type", cols.TYPE),
+    ("market", cols.MARKET),
+    ("locale", cols.LOCALE),
+    ("primary_exchange", cols.PRIMARY_EXCHANGE),
+    ("currency_name", cols.CURRENCY),
+    ("cik", cols.CIK),
+    ("composite_figi", cols.COMPOSITE_FIGI),
+    ("share_class_figi", cols.SHARE_CLASS_FIGI),
+    ("sic_code", cols.SIC_CODE),
+    ("sic_description", cols.SIC_DESCRIPTION),
+    ("market_cap", cols.MARKET_CAP),
+    ("share_class_shares_outstanding", cols.SHARES_OUTSTANDING),
+    ("weighted_shares_outstanding", cols.WEIGHTED_SHARES_OUTSTANDING),
+    ("total_employees", cols.TOTAL_EMPLOYEES),
+    ("list_date", cols.LIST_DATE),
+    ("homepage_url", cols.HOMEPAGE_URL),
+    ("phone_number", cols.PHONE_NUMBER),
+    ("ticker_root", cols.TICKER_ROOT),
 ]
 
 
@@ -158,37 +161,64 @@ def get_all_tickers(
     )
 
 
+def _fetch_one_ticker_detail(
+    client: RESTClient,
+    symbol: str,
+) -> TickerDetails | None:
+    """Fetch details for a single ticker, returning *None* on failure."""
+    try:
+        result = client.get_ticker_details(symbol)
+    except Exception:
+        logger.warning("Failed to fetch details for %s", symbol, exc_info=True)
+        return None
+    if isinstance(result, TickerDetails):
+        logger.debug("Fetched details for %s", symbol)
+        return result
+    return None
+
+
 def get_ticker_details(
     tickers: list[str],
     *,
     api_key: str | None = None,
+    max_workers: int = 10,
 ) -> GT:
     """Return detailed company information for each ticker.
 
-    Calls the Massive ``get_ticker_details`` endpoint once per ticker and
-    compiles the results into a :class:`great_tables.GT` table with
-    tickers as rows and detail fields as columns.
+    The Massive ``get_ticker_details`` endpoint is per-ticker, so this
+    function dispatches the requests **concurrently** using a thread
+    pool.  The Massive SDK is synchronous but each call is I/O-bound,
+    so threading gives a near-linear speedup until the API rate limit
+    or the network is saturated.
 
     Args:
         tickers: Ticker symbols to look up (e.g. ``["AAPL", "MSFT"]``).
         api_key: Massive API key.  Falls back to the ``MASSIVE_API_KEY``
             environment variable when *None*.
+        max_workers: Number of concurrent HTTP requests.  Defaults to
+            ``10``.  Tune up for higher API tiers, down to respect rate
+            limits.
 
     Returns:
-        A :class:`great_tables.GT` display table.
+        A :class:`great_tables.GT` display table with tickers as rows
+        and detail fields as columns.  Tickers for which the API
+        returned no data are silently dropped.
 
     Raises:
         RuntimeError: If no API key is available.
     """
-    logger.info("Fetching details for %d tickers: %s", len(tickers), tickers)
+    logger.info(
+        "Fetching details for %d tickers (max_workers=%d)",
+        len(tickers),
+        max_workers,
+    )
     client = get_client(api_key)
 
-    details: list[TickerDetails] = []
-    for symbol in tickers:
-        result = client.get_ticker_details(symbol)
-        logger.debug("Fetched details for %s", symbol)
-        if isinstance(result, TickerDetails):
-            details.append(result)
+    # Preserve input order by mapping in a thread pool.
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        results = list(pool.map(lambda t: _fetch_one_ticker_detail(client, t), tickers))
+
+    details: list[TickerDetails] = [r for r in results if r is not None]
 
     logger.info("Retrieved details for %d/%d tickers", len(details), len(tickers))
 
