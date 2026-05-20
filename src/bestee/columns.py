@@ -7,6 +7,12 @@ column in exactly one place when the schema evolves.
 # ── Common across most tables ────────────────────────────────────────
 TICKER = "Ticker"
 
+# ── All-tickers listing (see bestee.tickers.get_all_tickers) ─────────
+# Shorter display labels than the equivalents below — the listing view
+# trades detail for compactness.
+EXCHANGE = "Exchange"
+ACTIVE = "Active"
+
 # ── Ticker details (see bestee.tickers._DETAIL_FIELDS) ───────────────
 NAME = "Name"
 DESCRIPTION = "Description"

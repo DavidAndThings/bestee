@@ -144,40 +144,23 @@ def _fetch_statement(
 # ── Public API ───────────────────────────────────────────────────────
 
 
-def build_financials_table(
+def build_financials_df(
     tickers: list[str],
     metrics: list[FinancialMetric],
     *,
     api_key: str | None = None,
-) -> GT:
-    """Build a comparison table of financial metrics for the given tickers.
+) -> pl.DataFrame:
+    """Build the raw Polars DataFrame of financial metrics.
 
-    API calls are grouped by ``(statement_type, fiscal_year,
-    fiscal_quarter)``.  Metrics from the same statement *and* period are
-    fetched in a **single call** with all tickers batched via
-    ``tickers.any_of``.  Statement types with no requested metrics are
-    never called.
+    Same semantics as :func:`build_financials_table` but returns the
+    unstyled DataFrame.  Used by the decorator pipeline to chain
+    transformations without round-tripping through Great Tables.
 
-    Requesting the same metric for two different quarters results in two
-    separate columns and (at most) two API calls — one per period.
-
-    Args:
-        tickers: Ticker symbols to include as rows (e.g.
-            ``["AAPL", "MSFT", "GOOG"]``).
-        metrics: The financial metrics (with fiscal periods) to include
-            as columns.
-        api_key: Massive API key.  Falls back to the ``MASSIVE_API_KEY``
-            environment variable when *None*.
-
-    Returns:
-        A :class:`great_tables.GT` display table with *tickers* on the
-        rows and *metrics* on the columns.
-
-    Raises:
-        RuntimeError: If no API key is available.
+    See :func:`build_financials_table` for argument and behavior
+    documentation.
     """
     logger.info(
-        "Building financials table for %d tickers with %d metrics",
+        "Building financials DataFrame for %d tickers with %d metrics",
         len(tickers),
         len(metrics),
     )
@@ -214,19 +197,50 @@ def build_financials_table(
                 if value is not None:
                     data[ticker][m.label] = float(value)
 
+    # Build a Polars DataFrame preserving the caller's ticker order.
+    rows = [{"Ticker": t, **data[t]} for t in tickers]
+    return pl.DataFrame(rows)
+
+
+def build_financials_table(
+    tickers: list[str],
+    metrics: list[FinancialMetric],
+    *,
+    api_key: str | None = None,
+) -> GT:
+    """Build a comparison table of financial metrics for the given tickers.
+
+    API calls are grouped by ``(statement_type, fiscal_year,
+    fiscal_quarter)``.  Metrics from the same statement *and* period are
+    fetched in a **single call** with all tickers batched via
+    ``tickers.any_of``.  Statement types with no requested metrics are
+    never called.
+
+    Requesting the same metric for two different quarters results in two
+    separate columns and (at most) two API calls — one per period.
+
+    Args:
+        tickers: Ticker symbols to include as rows (e.g.
+            ``["AAPL", "MSFT", "GOOG"]``).
+        metrics: The financial metrics (with fiscal periods) to include
+            as columns.
+        api_key: Massive API key.  Falls back to the ``MASSIVE_API_KEY``
+            environment variable when *None*.
+
+    Returns:
+        A :class:`great_tables.GT` display table with *tickers* on the
+        rows and *metrics* on the columns.
+
+    Raises:
+        RuntimeError: If no API key is available.
+    """
+    df = build_financials_df(tickers, metrics, api_key=api_key)
+    metric_cols = [m.label for m in metrics]
+    periods = sorted({f"FY{m.fiscal_year} Q{m.fiscal_quarter}" for m in metrics})
+
     logger.info(
         "Built financials GT table: %d tickers × %d metrics", len(tickers), len(metrics)
     )
-
-    # Build a Polars DataFrame preserving the caller's ticker order.
-    rows = [{"Ticker": t, **data[t]} for t in tickers]
-    df = pl.DataFrame(rows)
-
-    metric_cols = [m.label for m in metrics]
-
-    # Collect the distinct periods for the subtitle.
-    periods = sorted({f"FY{m.fiscal_year} Q{m.fiscal_quarter}" for m in metrics})
-
     return (
         GT(df)
         .tab_header(

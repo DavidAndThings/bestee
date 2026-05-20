@@ -31,7 +31,7 @@ def _make_financial(
     period_end: str,
     **fields: float,
 ) -> MagicMock:
-    mock = MagicMock()
+    mock = MagicMock(spec=[])  # empty spec — unset attrs raise AttributeError
     mock.tickers = tickers
     mock.period_end = period_end
     for k, v in fields.items():
@@ -86,7 +86,7 @@ class TestGroupMetrics:
 
 class TestResolveTicker:
     def test_resolves_from_tickers_list(self) -> None:
-        result = MagicMock()
+        result = MagicMock(spec=[])
         result.tickers = ["AAPL", "AAPL"]
         assert _resolve_ticker(result, {"AAPL", "MSFT"}) == "AAPL"
 
@@ -103,7 +103,7 @@ class TestResolveTicker:
 
 class TestPeriodSortKey:
     def test_uses_period_end(self) -> None:
-        r = MagicMock()
+        r = MagicMock(spec=[])
         r.period_end = "2024-12-31"
         assert _period_sort_key(r) == "2024-12-31"
 

@@ -11,9 +11,9 @@ import polars as pl
 from great_tables import GT
 
 from bestee import columns as cols
-from bestee.financials import build_financials_table
+from bestee.financials import build_financials_df
 from bestee.models import FinancialMetric, Metric
-from bestee.tickers import get_all_tickers, get_ticker_details
+from bestee.tickers import get_all_tickers_df, get_ticker_details_df
 
 logger = logging.getLogger(__name__)
 
@@ -29,20 +29,30 @@ class ProcessingLevelError(Exception):
 
 
 class TableDecorator(ABC):
+    """Base class for pipeline stages that produce a tabular result.
+
+    Stages chain internally as DataFrame → DataFrame via :meth:`_build_df`
+    so the pipeline avoids round-tripping through Great Tables between
+    every step.  Each stage's :meth:`build` wraps the final DataFrame in
+    a styled :class:`GT` for end-user display.
+    """
+
     def __init__(self, upstream_decorator: TableDecorator | None = None):
         self._upstream = upstream_decorator
 
-    def _build_upstream(self) -> GT:
+    def _build_upstream_df(self) -> pl.DataFrame:
+        """Return the upstream stage's DataFrame, or raise if none."""
         if self._upstream is None:
             raise NoUpstreamError("No upstream decorator")
-
-        return self._upstream.build()
+        return self._upstream._build_df()
 
     @abstractmethod
-    def build(
-        self,
-    ) -> GT:
-        pass
+    def _build_df(self) -> pl.DataFrame:
+        """Return the stage's output as a Polars DataFrame (no styling)."""
+
+    @abstractmethod
+    def build(self) -> GT:
+        """Return the stage's output as a styled Great Tables object."""
 
 
 class TickerSummaryDecorator(TableDecorator):
@@ -53,12 +63,21 @@ class TickerSummaryDecorator(TableDecorator):
         super().__init__(None)
         self.ticker_type = ticker_type
 
-    def build(
-        self,
-    ) -> GT:
-        all_tickers_table = get_all_tickers(ticker_type=self.ticker_type, active=True)
-        symbols: list[str] = all_tickers_table._tbl_data[cols.TICKER].to_list()
-        return get_ticker_details(symbols)
+    def _build_df(self) -> pl.DataFrame:
+        symbols_df = get_all_tickers_df(ticker_type=self.ticker_type, active=True)
+        symbols: list[str] = symbols_df[cols.TICKER].to_list()
+        return get_ticker_details_df(symbols)
+
+    def build(self) -> GT:
+        df = self._build_df()
+        return (
+            GT(df)
+            .tab_header(
+                title="Ticker Details",
+                subtitle=f"{df.height} tickers from the Massive API",
+            )
+            .sub_missing(missing_text="—")
+        )
 
 
 class SameSICategoryDecorator(TableDecorator):
@@ -66,11 +85,8 @@ class SameSICategoryDecorator(TableDecorator):
         super().__init__(upstream)
         self.ticker = ticker
 
-    def build(
-        self,
-    ) -> GT:
-        upstream_table = self._build_upstream()
-        df: pl.DataFrame = upstream_table._tbl_data
+    def _build_df(self) -> pl.DataFrame:
+        df = self._build_upstream_df()
 
         # Locate the target ticker's SIC code.
         target_rows = df.filter(pl.col(cols.TICKER) == self.ticker)
@@ -78,10 +94,18 @@ class SameSICategoryDecorator(TableDecorator):
             msg = f"Ticker {self.ticker!r} not found in upstream table"
             raise ValueError(msg)
         target_sic = target_rows[cols.SIC_CODE].item(0)
+        if target_sic is None:
+            msg = f"Ticker {self.ticker!r} has no SIC code in upstream table"
+            raise ValueError(msg)
 
         # Filter the upstream to rows sharing the same SIC code.
-        filtered = df.filter(pl.col(cols.SIC_CODE) == target_sic)
+        return df.filter(pl.col(cols.SIC_CODE) == target_sic)
 
+    def build(self) -> GT:
+        filtered = self._build_df()
+        target_sic = filtered.filter(pl.col(cols.TICKER) == self.ticker)[
+            cols.SIC_CODE
+        ].item(0)
         return (
             GT(filtered)
             .tab_header(
@@ -103,33 +127,27 @@ class FinancialsDecorator(TableDecorator):
     def add_metric(self, metric: FinancialMetric):
         self.metrics.append(metric)
 
-    def build(
-        self,
-    ) -> GT:
-        upstream_table = self._build_upstream()
-        upstream_df: pl.DataFrame = upstream_table._tbl_data
+    def _build_df(self) -> pl.DataFrame:
+        upstream_df = self._build_upstream_df()
 
         # No metrics requested — pass the upstream through untouched
         # so we don't make a wasted API call.
         if not self.metrics:
-            return upstream_table
+            return upstream_df
 
         tickers: list[str] = upstream_df[cols.TICKER].to_list()
-        metrics_table = build_financials_table(
-            tickers=tickers,
-            metrics=self.metrics,
-        )
-        metrics_df: pl.DataFrame = metrics_table._tbl_data
-
+        metrics_df = build_financials_df(tickers=tickers, metrics=self.metrics)
         # Polars DataFrames support .join(); GT objects do not.
-        joined = upstream_df.join(metrics_df, on=cols.TICKER, how="inner")
+        return upstream_df.join(metrics_df, on=cols.TICKER, how="inner")
 
+    def build(self) -> GT:
+        df = self._build_df()
         return (
-            GT(joined)
+            GT(df)
             .tab_header(
                 title="Tickers with Financial Metrics",
                 subtitle=(
-                    f"{joined.height} tickers · {len(self.metrics)} financial metric(s)"
+                    f"{df.height} tickers · {len(self.metrics)} financial metric(s)"
                 ),
             )
             .sub_missing(missing_text="—")
@@ -349,9 +367,8 @@ class ComputedMetricDecorator(TableDecorator):
 
     # ── Build ────────────────────────────────────────────────────────
 
-    def build(self) -> GT:
-        upstream_table = self._build_upstream()
-        upstream_df: pl.DataFrame = upstream_table._tbl_data
+    def _build_df(self) -> pl.DataFrame:
+        upstream_df = self._build_upstream_df()
         tickers: list[str] = upstream_df[cols.TICKER].to_list()
 
         # Verify all upstream column references exist before doing work.
@@ -368,12 +385,10 @@ class ComputedMetricDecorator(TableDecorator):
 
         # 1. Populate _v placeholders from a single financials API call.
         if self._fm_references:
-            metrics_table = build_financials_table(
+            metrics_df = build_financials_df(
                 tickers=tickers,
                 metrics=self._fm_references,
             )
-            metrics_df: pl.DataFrame = metrics_table._tbl_data
-
             for row in metrics_df.iter_rows(named=True):
                 ticker = row[cols.TICKER]
                 env = env_per_ticker.setdefault(ticker, {})
@@ -390,13 +405,24 @@ class ComputedMetricDecorator(TableDecorator):
                     raw = row.get(ref_col)
                     env[f"_c{i}"] = float(raw) if raw is not None else None
 
+        # Tickers with no inputs at all — surface this in logs to
+        # distinguish "missing data" from a deliberate null result.
+        empty_input_tickers = [t for t in tickers if not env_per_ticker.get(t)]
+        if empty_input_tickers:
+            logger.debug(
+                "%d ticker(s) had no inputs for %r: %s",
+                len(empty_input_tickers),
+                self._metric_label,
+                empty_input_tickers,
+            )
+
         # Evaluate the expression once per ticker.
         computed: list[float | None] = []
         for ticker in tickers:
             env = env_per_ticker.get(ticker, {})
             try:
                 value = self._evaluate(self._ast_tree, env)
-            except TypeError, ZeroDivisionError, OverflowError:
+            except (TypeError, ZeroDivisionError, OverflowError):
                 value = None
             computed.append(value)
 
@@ -407,16 +433,17 @@ class ComputedMetricDecorator(TableDecorator):
             sum(1 for v in computed if v is not None),
         )
 
-        # Append the new column to the upstream DataFrame.
-        result_df = upstream_df.with_columns(
+        return upstream_df.with_columns(
             pl.Series(name=self._metric_label, values=computed, dtype=pl.Float64)
         )
 
+    def build(self) -> GT:
+        df = self._build_df()
         return (
-            GT(result_df)
+            GT(df)
             .tab_header(
                 title=f"With Computed Metric: {self._metric_label}",
-                subtitle=f"{result_df.height} tickers",
+                subtitle=f"{df.height} tickers",
             )
             .sub_missing(missing_text="—")
         )

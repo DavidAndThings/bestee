@@ -2,6 +2,7 @@
 
 from unittest.mock import MagicMock, patch
 
+import pytest
 from great_tables import GT
 from massive.rest.models import Agg, GroupedDailyAgg, TickerSnapshot
 
@@ -272,12 +273,12 @@ class TestGetLatestMarketSnapshot:
         assert "BAD" not in html
 
     @patch(_CLIENT_PATCH)
-    def test_empty_result(
+    def test_empty_result_raises(
         self,
         mock_get_client: MagicMock,
     ) -> None:
+        """Empty snapshots leave the trading date unknowable — raise."""
         mock_get_client.return_value.get_snapshot_all.return_value = []
 
-        result = get_latest_market_snapshot()
-
-        assert isinstance(result, GT)
+        with pytest.raises(RuntimeError, match="trading date"):
+            get_latest_market_snapshot()

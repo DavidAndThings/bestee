@@ -88,6 +88,48 @@ def _fetch_tickers(
     return tickers
 
 
+def get_all_tickers_df(
+    *,
+    api_key: str | None = None,
+    market: str | None = None,
+    ticker_type: str | None = None,
+    active: bool | None = True,
+    limit: int = 1000,
+) -> pl.DataFrame:
+    """Return all tickers as a Polars DataFrame (unstyled).
+
+    Used by the decorator pipeline; see :func:`get_all_tickers` for the
+    Great Tables-wrapped public variant and full argument documentation.
+    """
+    logger.info(
+        "Building all-tickers DataFrame (market=%s, type=%s, active=%s)",
+        market,
+        ticker_type,
+        active,
+    )
+    tickers = _fetch_tickers(
+        api_key=api_key,
+        market=market,
+        ticker_type=ticker_type,
+        active=active,
+        limit=limit,
+    )
+    return pl.DataFrame(
+        [
+            {
+                cols.TICKER: t.ticker,
+                cols.NAME: t.name,
+                cols.MARKET: t.market,
+                cols.TYPE: t.type,
+                cols.CURRENCY: t.currency_name,
+                cols.EXCHANGE: t.primary_exchange,
+                cols.ACTIVE: t.active,
+            }
+            for t in tickers
+        ]
+    )
+
+
 def get_all_tickers(
     *,
     api_key: str | None = None,
@@ -120,44 +162,25 @@ def get_all_tickers(
     Raises:
         RuntimeError: If no API key is available.
     """
-    logger.info(
-        "Building all-tickers table (market=%s, type=%s, active=%s)",
-        market,
-        ticker_type,
-        active,
-    )
-    tickers = _fetch_tickers(
+    df = get_all_tickers_df(
         api_key=api_key,
         market=market,
         ticker_type=ticker_type,
         active=active,
         limit=limit,
     )
-
-    df = pl.DataFrame(
-        [
-            {
-                "Ticker": t.ticker,
-                "Name": t.name,
-                "Market": t.market,
-                "Type": t.type,
-                "Currency": t.currency_name,
-                "Exchange": t.primary_exchange,
-                "Active": t.active,
-            }
-            for t in tickers
-        ]
-    )
-
-    logger.info("Built GT table with %d tickers", len(tickers))
+    logger.info("Built GT table with %d tickers", df.height)
     return (
         GT(df)
         .tab_header(
             title="All Tickers",
-            subtitle=f"{len(tickers)} tickers from the Massive API",
+            subtitle=f"{df.height} tickers from the Massive API",
         )
-        .cols_align(align="center", columns=["Market", "Type", "Active"])
-        .cols_align(align="left", columns=["Ticker", "Name", "Currency", "Exchange"])
+        .cols_align(align="center", columns=[cols.MARKET, cols.TYPE, cols.ACTIVE])
+        .cols_align(
+            align="left",
+            columns=[cols.TICKER, cols.NAME, cols.CURRENCY, cols.EXCHANGE],
+        )
     )
 
 
@@ -175,6 +198,50 @@ def _fetch_one_ticker_detail(
         logger.debug("Fetched details for %s", symbol)
         return result
     return None
+
+
+def get_ticker_details_df(
+    tickers: list[str],
+    *,
+    api_key: str | None = None,
+    max_workers: int = 10,
+) -> pl.DataFrame:
+    """Return ticker-details as a Polars DataFrame (unstyled).
+
+    Used by the decorator pipeline; see :func:`get_ticker_details` for
+    the Great Tables-wrapped public variant and full argument
+    documentation.
+    """
+    logger.info(
+        "Fetching details for %d tickers (max_workers=%d)",
+        len(tickers),
+        max_workers,
+    )
+    client = get_client(api_key)
+
+    # Preserve input order by mapping in a thread pool.
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        results = list(pool.map(lambda t: _fetch_one_ticker_detail(client, t), tickers))
+
+    details: list[TickerDetails] = [r for r in results if r is not None]
+    logger.info("Retrieved details for %d/%d tickers", len(details), len(tickers))
+
+    # One row per ticker, one column per detail field.
+    rows: list[dict[str, str | None]] = []
+    for det in details:
+        row: dict[str, str | None] = {}
+        for attr, label in _DETAIL_FIELDS:
+            value = getattr(det, attr, None)
+            if isinstance(value, float):
+                row[label] = f"{value:,.0f}"
+            elif isinstance(value, int):
+                row[label] = f"{value:,}"
+            elif value is not None:
+                row[label] = str(value)
+            else:
+                row[label] = None
+        rows.append(row)
+    return pl.DataFrame(rows)
 
 
 def get_ticker_details(
@@ -207,39 +274,7 @@ def get_ticker_details(
     Raises:
         RuntimeError: If no API key is available.
     """
-    logger.info(
-        "Fetching details for %d tickers (max_workers=%d)",
-        len(tickers),
-        max_workers,
-    )
-    client = get_client(api_key)
-
-    # Preserve input order by mapping in a thread pool.
-    with ThreadPoolExecutor(max_workers=max_workers) as pool:
-        results = list(pool.map(lambda t: _fetch_one_ticker_detail(client, t), tickers))
-
-    details: list[TickerDetails] = [r for r in results if r is not None]
-
-    logger.info("Retrieved details for %d/%d tickers", len(details), len(tickers))
-
-    # One row per ticker, one column per detail field.
-    rows: list[dict[str, str | None]] = []
-    for det in details:
-        row: dict[str, str | None] = {}
-        for attr, label in _DETAIL_FIELDS:
-            value = getattr(det, attr, None)
-            if isinstance(value, float):
-                row[label] = f"{value:,.0f}"
-            elif isinstance(value, int):
-                row[label] = f"{value:,}"
-            elif value is not None:
-                row[label] = str(value)
-            else:
-                row[label] = None
-        rows.append(row)
-
-    df = pl.DataFrame(rows)
-
+    df = get_ticker_details_df(tickers, api_key=api_key, max_workers=max_workers)
     detail_cols = [label for _, label in _DETAIL_FIELDS]
 
     logger.info("Built ticker details GT table")
@@ -247,7 +282,7 @@ def get_ticker_details(
         GT(df)
         .tab_header(
             title="Ticker Details",
-            subtitle=f"{len(details)} tickers from the Massive API",
+            subtitle=f"{df.height} tickers from the Massive API",
         )
         .cols_align(align="left", columns=detail_cols)
         .sub_missing(missing_text="\u2014")

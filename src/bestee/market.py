@@ -125,6 +125,11 @@ def _trading_date_from_snapshots(
     The ``updated`` field is a nanosecond-epoch timestamp.  We convert it
     to a date string in US Eastern time (the timezone US markets operate
     in).
+
+    Raises:
+        RuntimeError: If no snapshot in the input carries a usable
+            timestamp.  In that case the trading date is unknowable and
+            date-stamped column names would be meaningless.
     """
     for snap in snapshots:
         if isinstance(snap, TickerSnapshot) and snap.updated is not None:
@@ -134,8 +139,8 @@ def _trading_date_from_snapshots(
                 ts.strftime("%Y-%m-%d"),
             )
             return ts.strftime("%Y-%m-%d")
-    logger.warning("Could not derive trading date from snapshots")
-    return "unknown"
+    msg = "Could not derive trading date from snapshots (no usable timestamps)"
+    raise RuntimeError(msg)
 
 
 def get_latest_market_snapshot(
@@ -164,7 +169,9 @@ def get_latest_market_snapshot(
         and VWAP.
 
     Raises:
-        RuntimeError: If no API key is available.
+        RuntimeError: If no API key is available, or if the snapshot
+            response contains no usable timestamps (the trading date
+            cannot be derived).
     """
     logger.info("Fetching latest market snapshot (include_otc=%s)", include_otc)
     client = get_client(api_key)

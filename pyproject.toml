@@ -1,7 +1,7 @@
 [project]
 name = "bestee"
 version = "0.1.0"
-description = "Add your description here"
+description = "Financial data toolkit and table-building DSL on top of the Massive API."
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [

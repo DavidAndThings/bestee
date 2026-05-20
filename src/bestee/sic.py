@@ -6,6 +6,7 @@ import json
 import logging
 import re
 from pathlib import Path
+from typing import cast
 
 import httpx
 import platformdirs
@@ -99,16 +100,40 @@ def _save_cache(rows: list[dict[str, str]]) -> None:
         logger.warning("Failed to write SIC cache to %s", _USER_CACHE)
 
 
+_REQUIRED_CACHE_KEYS = frozenset({"sic_code", "industry_title", "office"})
+
+
+def _validate_cache_rows(data: object) -> list[dict[str, str]] | None:
+    """Return *data* as the expected list-of-dicts shape, or *None*.
+
+    Defends against schema drift from older cache files.  A non-list or a
+    list whose first element doesn't carry the expected keys is rejected
+    so we fall back to the bundled snapshot.
+    """
+    if not isinstance(data, list):
+        return None
+    if data and (
+        not isinstance(data[0], dict)
+        or not _REQUIRED_CACHE_KEYS.issubset(data[0].keys())
+    ):
+        return None
+    return cast(list[dict[str, str]], data)
+
+
 def _load_bundled_cache() -> list[dict[str, str]] | None:
     """Load the SIC snapshot bundled with the package via importlib.resources."""
     try:
         ref = importlib.resources.files(bestee.resources).joinpath("sic_codes.json")
-        data: list[dict[str, str]] = json.loads(ref.read_text(encoding="utf-8"))
-        logger.info("Loaded %d SIC codes from bundled cache", len(data))
-        return data
-    except OSError, json.JSONDecodeError:
+        data = json.loads(ref.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
         logger.warning("Failed to read bundled SIC cache")
         return None
+    rows = _validate_cache_rows(data)
+    if rows is None:
+        logger.warning("Bundled SIC cache has unexpected schema")
+        return None
+    logger.info("Loaded %d SIC codes from bundled cache", len(rows))
+    return rows
 
 
 def _load_cache() -> list[dict[str, str]] | None:
@@ -120,15 +145,23 @@ def _load_cache() -> list[dict[str, str]] | None:
     # 1. Try user cache (from a previous successful scrape).
     if _USER_CACHE.is_file():
         try:
-            data: list[dict[str, str]] = json.loads(
-                _USER_CACHE.read_text(encoding="utf-8")
-            )
-            logger.info(
-                "Loaded %d SIC codes from user cache (%s)", len(data), _USER_CACHE
-            )
-            return data
-        except OSError, json.JSONDecodeError:
+            data = json.loads(_USER_CACHE.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
             logger.warning("Failed to read user cache at %s", _USER_CACHE)
+        else:
+            rows = _validate_cache_rows(data)
+            if rows is None:
+                logger.warning(
+                    "User cache at %s has unexpected schema — ignoring",
+                    _USER_CACHE,
+                )
+            else:
+                logger.info(
+                    "Loaded %d SIC codes from user cache (%s)",
+                    len(rows),
+                    _USER_CACHE,
+                )
+                return rows
 
     # 2. Fall back to the bundled snapshot.
     return _load_bundled_cache()
