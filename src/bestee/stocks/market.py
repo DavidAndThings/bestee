@@ -2,7 +2,8 @@
 
 import datetime as dt
 import logging
-from typing import Literal
+from collections.abc import Sequence
+from typing import Literal, cast
 
 import polars as pl
 from great_tables import GT
@@ -10,6 +11,7 @@ from massive.rest.models import Agg, GroupedDailyAgg, TickerSnapshot
 from massive.rest.models.common import Sort
 
 from bestee.client import get_client
+from bestee.stocks.models import TimeSeriesDef, TimeSeriesName
 
 logger = logging.getLogger(__name__)
 
@@ -433,3 +435,55 @@ def get_ohlc_table(
             ],
         )
     )
+
+
+_TIME_SERIES_FIELDS: dict[TimeSeriesName, str] = {
+    TimeSeriesName.OPEN_PRICE: "Open",
+    TimeSeriesName.HIGH_PRICE: "High",
+    TimeSeriesName.LOW_PRICE: "Low",
+    TimeSeriesName.CLOSE_PRICE: "Close",
+}
+
+
+def get_time_series(
+    ticker: str,
+    ts_def: TimeSeriesDef,
+    *,
+    api_key: str | None = None,
+) -> Sequence[float]:
+    """Return a single OHLC field as a sequence of floats.
+
+    Convenience wrapper for the common case of "give me just the close
+    prices" (or open, high, low) over a date range, without the rest
+    of the OHLCV frame.  Internally fetches bars via :func:`get_ohlc`
+    and extracts the field named by ``ts_def.name``.
+
+    Args:
+        ticker: Ticker symbol.
+        ts_def: Bundle of bar-window unit (``ts_def.span``), multiplier
+            (``ts_def.multiplier``), date range
+            (``ts_def.start``/``ts_def.end``), and which OHLC field to
+            extract (``ts_def.name``).
+        api_key: Massive API key.  Falls back to ``MASSIVE_API_KEY``.
+
+    Returns:
+        A list of floats, one per bar, in chronological order.  Bars
+        with a null value for the requested field are dropped so the
+        result has no ``None``s.  Caller wanting timestamp alignment
+        should use :func:`get_ohlc` directly.
+
+    Raises:
+        RuntimeError: If no API key is available.
+        KeyError: If ``ts_def.name`` isn't one of the OPEN/HIGH/LOW/
+            CLOSE_PRICE members of :class:`TimeSeriesName`.
+    """
+    column = _TIME_SERIES_FIELDS[ts_def.name]
+    df = get_ohlc(
+        ticker,
+        ts_def.start,
+        ts_def.end,
+        timespan=cast(Timespan, ts_def.span.value),
+        multiplier=ts_def.multiplier,
+        api_key=api_key,
+    )
+    return df[column].drop_nulls().to_list()

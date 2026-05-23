@@ -14,7 +14,9 @@ from bestee.stocks.market import (
     get_market_snapshot,
     get_ohlc,
     get_ohlc_table,
+    get_time_series,
 )
+from bestee.stocks.models import TimeSeriesDef, TimeSeriesName, TimeSeriesSpan
 
 _CLIENT_PATCH = "bestee.stocks.market.get_client"
 
@@ -532,3 +534,122 @@ class TestGetOhlcTable:
         html = get_ohlc_table("AAPL", "2025-01-01", "2025-01-31").as_raw_html()
         assert "1 day" in html
         assert "1 days" not in html
+
+
+class TestGetTimeSeries:
+    @patch(_CLIENT_PATCH)
+    def test_returns_close_prices_in_order(
+        self,
+        mock_get_client: MagicMock,
+    ) -> None:
+        mock_get_client.return_value.get_aggs.return_value = [
+            _make_agg(close=100.0, timestamp=1_736_172_000_000),
+            _make_agg(close=101.5, timestamp=1_736_258_400_000),
+            _make_agg(close=102.25, timestamp=1_736_344_800_000),
+        ]
+
+        series = get_time_series(
+            "AAPL",
+            TimeSeriesDef(
+                name=TimeSeriesName.CLOSE_PRICE,
+                span=TimeSeriesSpan.DAY,
+                start="2025-01-06",
+                end="2025-01-08",
+            ),
+        )
+
+        assert series == [100.0, 101.5, 102.25]
+
+    @patch(_CLIENT_PATCH)
+    def test_picks_correct_field_per_name(
+        self,
+        mock_get_client: MagicMock,
+    ) -> None:
+        """OPEN_PRICE → bar.open, HIGH_PRICE → bar.high, etc."""
+        mock_get_client.return_value.get_aggs.return_value = [
+            _make_agg(open_=50.0, high=55.0, low=49.0, close=52.0),
+        ]
+
+        for name, expected in [
+            (TimeSeriesName.OPEN_PRICE, 50.0),
+            (TimeSeriesName.HIGH_PRICE, 55.0),
+            (TimeSeriesName.LOW_PRICE, 49.0),
+            (TimeSeriesName.CLOSE_PRICE, 52.0),
+        ]:
+            series = get_time_series(
+                "AAPL",
+                TimeSeriesDef(
+                    name=name,
+                    span=TimeSeriesSpan.DAY,
+                    start="2025-01-06",
+                    end="2025-01-06",
+                ),
+            )
+            assert series == [expected], f"{name}: expected [{expected}], got {series}"
+
+    @patch(_CLIENT_PATCH)
+    def test_forwards_span_and_multiplier(
+        self,
+        mock_get_client: MagicMock,
+    ) -> None:
+        mock_get_client.return_value.get_aggs.return_value = []
+
+        get_time_series(
+            "TSLA",
+            TimeSeriesDef(
+                name=TimeSeriesName.CLOSE_PRICE,
+                span=TimeSeriesSpan.MINUTE,
+                start="2025-01-06",
+                end="2025-01-06",
+                multiplier=15,
+            ),
+        )
+
+        args = mock_get_client.return_value.get_aggs.call_args.args
+        # (ticker, multiplier, timespan, from_, to)
+        assert args[0] == "TSLA"
+        assert args[1] == 15
+        assert args[2] == "minute"
+
+    @patch(_CLIENT_PATCH)
+    def test_drops_null_values(
+        self,
+        mock_get_client: MagicMock,
+    ) -> None:
+        """Bars with no close (e.g. data gaps) should be filtered out."""
+        mock_get_client.return_value.get_aggs.return_value = [
+            _make_agg(close=100.0, timestamp=1_736_172_000_000),
+            _make_agg(close=None, timestamp=1_736_258_400_000),
+            _make_agg(close=102.0, timestamp=1_736_344_800_000),
+        ]
+
+        series = get_time_series(
+            "AAPL",
+            TimeSeriesDef(
+                name=TimeSeriesName.CLOSE_PRICE,
+                span=TimeSeriesSpan.DAY,
+                start="2025-01-06",
+                end="2025-01-08",
+            ),
+        )
+
+        assert series == [100.0, 102.0]
+
+    @patch(_CLIENT_PATCH)
+    def test_empty_range_returns_empty_list(
+        self,
+        mock_get_client: MagicMock,
+    ) -> None:
+        mock_get_client.return_value.get_aggs.return_value = []
+
+        series = get_time_series(
+            "AAPL",
+            TimeSeriesDef(
+                name=TimeSeriesName.CLOSE_PRICE,
+                span=TimeSeriesSpan.DAY,
+                start="2025-12-25",
+                end="2025-12-25",
+            ),
+        )
+
+        assert series == []

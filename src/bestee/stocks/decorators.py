@@ -12,7 +12,7 @@ from great_tables import GT
 
 from bestee.stocks import columns as cols
 from bestee.stocks.financials import build_financials_df
-from bestee.stocks.models import FinancialMetric, Metric
+from bestee.stocks.models import FinancialMetric, Metric, TimeSeriesDef
 from bestee.stocks.tickers import get_all_tickers_df, get_ticker_details_df
 
 logger = logging.getLogger(__name__)
@@ -53,6 +53,30 @@ class TableDecorator(ABC):
     @abstractmethod
     def build(self) -> GT:
         """Return the stage's output as a styled Great Tables object."""
+
+    def _get_time_series(self, ticker: str, ts_def: TimeSeriesDef) -> Sequence[float]:
+        """Return the time series for *ticker* if this stage knows how.
+
+        Stages that don't supply time-series data should leave the
+        default — it raises :class:`NotImplementedError`, which lets
+        :meth:`get_time_series` fall back to the upstream stage.
+        """
+        raise NotImplementedError
+
+    def get_time_series(self, ticker: str, ts_def: TimeSeriesDef) -> Sequence[float]:
+        """Walk the decorator chain until a stage can serve the series.
+
+        Each stage gets a chance to provide the data via
+        :meth:`_get_time_series`; on :class:`NotImplementedError` the
+        call delegates upstream.  If no stage in the chain implements
+        it, the original :class:`NotImplementedError` propagates.
+        """
+        try:
+            return self._get_time_series(ticker, ts_def)
+        except NotImplementedError:
+            if self._upstream is not None:
+                return self._upstream.get_time_series(ticker, ts_def)
+            raise
 
 
 class TickerSummaryDecorator(TableDecorator):

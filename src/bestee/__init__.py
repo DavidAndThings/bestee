@@ -8,8 +8,16 @@ from bestee.stocks.market import (
     get_market_snapshot,
     get_ohlc,
     get_ohlc_table,
+    get_time_series,
 )
-from bestee.stocks.models import FinancialMetric, Metric, StatementType
+from bestee.stocks.models import (
+    FinancialMetric,
+    Metric,
+    StatementType,
+    TimeSeriesDef,
+    TimeSeriesName,
+    TimeSeriesSpan,
+)
 from bestee.stocks.sic import get_sic_codes
 from bestee.stocks.tickers import get_all_tickers, get_ticker_details
 
@@ -17,6 +25,9 @@ __all__ = [
     "FinancialMetric",
     "Metric",
     "StatementType",
+    "TimeSeriesDef",
+    "TimeSeriesName",
+    "TimeSeriesSpan",
     "build_financials_table",
     "get_all_tickers",
     "get_latest_market_snapshot",
@@ -25,4 +36,5 @@ __all__ = [
     "get_ohlc_table",
     "get_sic_codes",
     "get_ticker_details",
+    "get_time_series",
 ]

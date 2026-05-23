@@ -1,5 +1,6 @@
 """Data models for bestee financial metrics."""
 
+import datetime as dt
 from dataclasses import dataclass
 from enum import Enum
 
@@ -187,3 +188,28 @@ class FinancialMetric:
     def label(self) -> str:
         """Column header including the fiscal period."""
         return f"{self.metric.base_label} (FY{self.fiscal_year} Q{self.fiscal_quarter})"
+
+
+class TimeSeriesSpan(Enum):
+    SECOND = "second"
+    MINUTE = "minute"
+    HOUR = "hour"
+    DAY = "day"
+    WEEK = "week"
+    MONTH = "month"
+
+
+class TimeSeriesName(Enum):
+    OPEN_PRICE = "open_price"
+    HIGH_PRICE = "high_price"
+    LOW_PRICE = "low_price"
+    CLOSE_PRICE = "close_price"
+
+
+@dataclass
+class TimeSeriesDef:
+    name: TimeSeriesName
+    span: TimeSeriesSpan
+    start: str | dt.date | dt.datetime
+    end: str | dt.date | dt.datetime
+    multiplier: int = 1
