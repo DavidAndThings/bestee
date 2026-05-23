@@ -10,10 +10,10 @@ from typing import Any
 import polars as pl
 from great_tables import GT
 
-from bestee import columns as cols
-from bestee.financials import build_financials_df
-from bestee.models import FinancialMetric, Metric
-from bestee.tickers import get_all_tickers_df, get_ticker_details_df
+from bestee.stocks import columns as cols
+from bestee.stocks.financials import build_financials_df
+from bestee.stocks.models import FinancialMetric, Metric
+from bestee.stocks.tickers import get_all_tickers_df, get_ticker_details_df
 
 logger = logging.getLogger(__name__)
 

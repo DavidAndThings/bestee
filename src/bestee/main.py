@@ -1,6 +1,6 @@
 """Main entry point for bestee."""
 
-from bestee.tickers import get_all_tickers
+from bestee.stocks.tickers import get_all_tickers
 
 
 def main() -> None:

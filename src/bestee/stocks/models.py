@@ -150,7 +150,7 @@ class FinancialMetric:
 
     Usage::
 
-        from bestee.models import FinancialMetric, Metric
+        from bestee.stocks.models import FinancialMetric, Metric
 
         metrics = [
             FinancialMetric(Metric.REVENUE, fiscal_year=2024, fiscal_quarter=4),

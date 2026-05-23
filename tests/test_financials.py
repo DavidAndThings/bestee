@@ -1,18 +1,18 @@
-"""Tests for bestee.financials."""
+"""Tests for bestee.stocks.financials."""
 
 from unittest.mock import MagicMock, patch
 
 from great_tables import GT
 
-from bestee.financials import (
+from bestee.stocks.financials import (
     _group_metrics,
     _period_sort_key,
     _resolve_ticker,
     build_financials_table,
 )
-from bestee.models import FinancialMetric, Metric, StatementType
+from bestee.stocks.models import FinancialMetric, Metric, StatementType
 
-_CLIENT_PATCH = "bestee.financials.get_client"
+_CLIENT_PATCH = "bestee.stocks.financials.get_client"
 
 # Shorthand helpers for building FinancialMetric instances.
 _REV_Q4_24 = FinancialMetric(Metric.REVENUE, fiscal_year=2024, fiscal_quarter=4)

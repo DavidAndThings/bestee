@@ -1,4 +1,4 @@
-"""Tests for bestee.decorators — DSL parser, evaluator, and builder."""
+"""Tests for bestee.stocks.decorators — DSL parser, evaluator, and builder."""
 
 import ast
 import importlib.resources
@@ -9,8 +9,8 @@ import pytest
 from great_tables import GT
 
 import bestee.resources
-from bestee import columns as cols
-from bestee.decorators import (
+from bestee.stocks import columns as cols
+from bestee.stocks.decorators import (
     ComputedMetricDecorator,
     FinancialsDecorator,
     NoUpstreamError,
@@ -20,7 +20,7 @@ from bestee.decorators import (
     TickerSummaryDecorator,
     decorator_builder,
 )
-from bestee.models import FinancialMetric, Metric
+from bestee.stocks.models import FinancialMetric, Metric
 
 # ── Stub upstream decorator for unit-testing chains ──────────────────
 
@@ -354,7 +354,7 @@ class TestSameSICategoryDecorator:
 # ── ComputedMetricDecorator integration ──────────────────────────────
 
 
-_FINANCIALS_PATCH = "bestee.decorators.build_financials_df"
+_FINANCIALS_PATCH = "bestee.stocks.decorators.build_financials_df"
 
 
 class TestComputedMetricBuild:

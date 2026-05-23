@@ -10,7 +10,7 @@ from great_tables import GT
 from massive import RESTClient
 
 from bestee.client import get_client
-from bestee.models import FinancialMetric, StatementType
+from bestee.stocks.models import FinancialMetric, StatementType
 
 logger = logging.getLogger(__name__)
 

@@ -7,7 +7,7 @@ import time
 import traceback
 
 import bestee.resources
-from bestee.decorators import decorator_builder
+from bestee.stocks.decorators import decorator_builder
 
 logging.basicConfig(
     level=logging.INFO,

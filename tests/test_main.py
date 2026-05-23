@@ -6,10 +6,15 @@ import pytest
 from great_tables import GT
 from massive.rest.models import Ticker, TickerDetails
 
-from bestee.tickers import _fetch_tickers, get_all_tickers, get_ticker_details
+from bestee.stocks.tickers import (
+    _fetch_tickers,
+    get_all_tickers,
+    get_ticker_detail,
+    get_ticker_details,
+)
 
 # Patch target for the client factory used by tickers.py
-_CLIENT_PATCH = "bestee.tickers.get_client"
+_CLIENT_PATCH = "bestee.stocks.tickers.get_client"
 _DOTENV_PATCH = "bestee.client.load_dotenv"
 
 
@@ -242,3 +247,48 @@ class TestGetTickerDetails:
         assert "MSFT" in html
         assert "Apple Inc." in html
         assert "Microsoft Corporation" in html
+
+
+class TestGetTickerDetail:
+    """Single-ticker public wrapper shared with other modules (e.g. etf.issuer)."""
+
+    @patch(_CLIENT_PATCH)
+    def test_returns_ticker_details_on_success(
+        self,
+        mock_get_client: MagicMock,
+    ) -> None:
+        details = _make_fake_details(ticker="AAPL", name="Apple Inc.")
+        mock_get_client.return_value.get_ticker_details.return_value = details
+
+        result = get_ticker_detail("AAPL")
+        assert result is details
+        mock_get_client.return_value.get_ticker_details.assert_called_once_with("AAPL")
+
+    @patch(_CLIENT_PATCH)
+    def test_returns_none_on_sdk_exception(
+        self,
+        mock_get_client: MagicMock,
+    ) -> None:
+        mock_get_client.return_value.get_ticker_details.side_effect = RuntimeError(
+            "timeout"
+        )
+        assert get_ticker_detail("AAPL") is None
+
+    @patch(_CLIENT_PATCH)
+    def test_returns_none_for_unexpected_response_type(
+        self,
+        mock_get_client: MagicMock,
+    ) -> None:
+        mock_get_client.return_value.get_ticker_details.return_value = "not details"
+        assert get_ticker_detail("AAPL") is None
+
+    @patch(_CLIENT_PATCH)
+    def test_threads_api_key_through(
+        self,
+        mock_get_client: MagicMock,
+    ) -> None:
+        mock_get_client.return_value.get_ticker_details.return_value = (
+            _make_fake_details()
+        )
+        get_ticker_detail("AAPL", api_key="xyz")
+        mock_get_client.assert_called_once_with("xyz")

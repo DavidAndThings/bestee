@@ -7,13 +7,13 @@ column in exactly one place when the schema evolves.
 # ── Common across most tables ────────────────────────────────────────
 TICKER = "Ticker"
 
-# ── All-tickers listing (see bestee.tickers.get_all_tickers) ─────────
+# ── All-tickers listing (see bestee.stocks.tickers.get_all_tickers) ──
 # Shorter display labels than the equivalents below — the listing view
 # trades detail for compactness.
 EXCHANGE = "Exchange"
 ACTIVE = "Active"
 
-# ── Ticker details (see bestee.tickers._DETAIL_FIELDS) ───────────────
+# ── Ticker details (see bestee.stocks.tickers._DETAIL_FIELDS) ───────
 NAME = "Name"
 DESCRIPTION = "Description"
 TYPE = "Type"
@@ -35,6 +35,6 @@ HOMEPAGE_URL = "Homepage URL"
 PHONE_NUMBER = "Phone Number"
 TICKER_ROOT = "Ticker Root"
 
-# ── SIC codes table (see bestee.sic) ─────────────────────────────────
+# ── SIC codes table (see bestee.stocks.sic) ──────────────────────────
 INDUSTRY_TITLE = "Industry Title"
 OFFICE = "Office"

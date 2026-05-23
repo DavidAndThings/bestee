@@ -8,8 +8,8 @@ from great_tables import GT
 from massive import RESTClient
 from massive.rest.models import Ticker, TickerDetails
 
-from bestee import columns as cols
 from bestee.client import get_client
+from bestee.stocks import columns as cols
 
 logger = logging.getLogger(__name__)
 
@@ -198,6 +198,34 @@ def _fetch_one_ticker_detail(
         logger.debug("Fetched details for %s", symbol)
         return result
     return None
+
+
+def get_ticker_detail(
+    symbol: str,
+    *,
+    api_key: str | None = None,
+) -> TickerDetails | None:
+    """Return raw :class:`TickerDetails` for a single ticker, or *None*.
+
+    Useful when callers only need a small piece of the detail payload
+    (e.g. the long-form ``name``) and don't want the DataFrame wrapping
+    that :func:`get_ticker_details_df` provides.  Network/SDK errors are
+    caught and reported via the logger.
+
+    Args:
+        symbol: The ticker symbol to look up.
+        api_key: Massive API key.  Falls back to ``MASSIVE_API_KEY`` when
+            *None*.
+
+    Returns:
+        The :class:`TickerDetails` model on success, or *None* if the
+        request failed or the SDK returned an unexpected type.
+
+    Raises:
+        RuntimeError: If no API key is available.
+    """
+    client = get_client(api_key)
+    return _fetch_one_ticker_detail(client, symbol)
 
 
 def get_ticker_details_df(

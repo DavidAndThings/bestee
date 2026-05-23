@@ -1,4 +1,4 @@
-"""Tests for bestee.market."""
+"""Tests for bestee.stocks.market."""
 
 from unittest.mock import MagicMock, patch
 
@@ -6,9 +6,9 @@ import pytest
 from great_tables import GT
 from massive.rest.models import Agg, GroupedDailyAgg, TickerSnapshot
 
-from bestee.market import get_latest_market_snapshot, get_market_snapshot
+from bestee.stocks.market import get_latest_market_snapshot, get_market_snapshot
 
-_CLIENT_PATCH = "bestee.market.get_client"
+_CLIENT_PATCH = "bestee.stocks.market.get_client"
 
 
 def _make_bar(**kwargs: str | float | int | None) -> MagicMock:

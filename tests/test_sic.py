@@ -1,10 +1,10 @@
-"""Tests for bestee.sic."""
+"""Tests for bestee.stocks.sic."""
 
 from unittest.mock import MagicMock, patch
 
 from great_tables import GT
 
-from bestee.sic import _load_bundled_cache, _strip_html, get_sic_codes
+from bestee.stocks.sic import _load_bundled_cache, _strip_html, get_sic_codes
 
 _SAMPLE_HTML = """
 <html><body>
@@ -44,7 +44,7 @@ _CACHED_ROWS = [
 
 
 class TestGetSicCodes:
-    @patch("bestee.sic.httpx.get")
+    @patch("bestee.stocks.sic.httpx.get")
     def test_returns_gt_from_scrape(
         self,
         mock_get: MagicMock,
@@ -58,7 +58,7 @@ class TestGetSicCodes:
 
         assert isinstance(result, GT)
 
-    @patch("bestee.sic.httpx.get")
+    @patch("bestee.stocks.sic.httpx.get")
     def test_parses_all_rows(
         self,
         mock_get: MagicMock,
@@ -76,7 +76,7 @@ class TestGetSicCodes:
         assert "AGRICULTURAL PRODUCTION-CROPS" in html
         assert "ELECTRONIC COMPUTERS" in html
 
-    @patch("bestee.sic.httpx.get")
+    @patch("bestee.stocks.sic.httpx.get")
     def test_sends_user_agent(
         self,
         mock_get: MagicMock,
@@ -92,8 +92,8 @@ class TestGetSicCodes:
         assert "User-Agent" in kwargs["headers"]
         assert "bestee" in kwargs["headers"]["User-Agent"]
 
-    @patch("bestee.sic._load_cache", return_value=_CACHED_ROWS)
-    @patch("bestee.sic._scrape_sic_codes", side_effect=Exception("network down"))
+    @patch("bestee.stocks.sic._load_cache", return_value=_CACHED_ROWS)
+    @patch("bestee.stocks.sic._scrape_sic_codes", side_effect=Exception("network down"))
     def test_falls_back_to_cache_on_scrape_failure(
         self,
         _mock_scrape: MagicMock,
@@ -106,8 +106,8 @@ class TestGetSicCodes:
         html = result.as_raw_html()
         assert "ELECTRONIC COMPUTERS" in html
 
-    @patch("bestee.sic._load_cache", return_value=None)
-    @patch("bestee.sic._scrape_sic_codes", side_effect=Exception("network down"))
+    @patch("bestee.stocks.sic._load_cache", return_value=None)
+    @patch("bestee.stocks.sic._scrape_sic_codes", side_effect=Exception("network down"))
     def test_raises_when_no_cache_and_scrape_fails(
         self,
         _mock_scrape: MagicMock,
@@ -119,8 +119,8 @@ class TestGetSicCodes:
         with pytest.raises(RuntimeError, match="Could not obtain SIC codes"):
             get_sic_codes()
 
-    @patch("bestee.sic._save_cache")
-    @patch("bestee.sic.httpx.get")
+    @patch("bestee.stocks.sic._save_cache")
+    @patch("bestee.stocks.sic.httpx.get")
     def test_saves_cache_after_successful_scrape(
         self,
         mock_get: MagicMock,

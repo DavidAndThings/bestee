@@ -51,7 +51,7 @@ COMPUTED_METRIC GROSS_MARGIN (FINANCIAL_METRIC GROSS_PROFIT 2024 4) / (FINANCIAL
 ```
 
 ```python
-from bestee.decorators import decorator_builder
+from bestee.stocks.decorators import decorator_builder
 
 commands = [line.split() for line in script.splitlines() if line.strip()]
 pipeline = decorator_builder(commands)
