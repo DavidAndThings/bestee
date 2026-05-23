@@ -2,10 +2,12 @@
 
 import datetime as dt
 import logging
+from typing import Literal
 
 import polars as pl
 from great_tables import GT
-from massive.rest.models import GroupedDailyAgg, TickerSnapshot
+from massive.rest.models import Agg, GroupedDailyAgg, TickerSnapshot
+from massive.rest.models.common import Sort
 
 from bestee.client import get_client
 
@@ -14,6 +16,15 @@ logger = logging.getLogger(__name__)
 _US_EASTERN = dt.timezone(dt.timedelta(hours=-4))
 
 _BASE_FIELDS = ["Open", "High", "Low", "Close", "Volume", "VWAP", "Transactions"]
+
+# Massive supports the full Polygon-style set of bar timespans.  Keep
+# this in sync with the ``timespan`` parameter that the upstream API
+# documents — invalid values produce a 400 from the server but the
+# Literal catches typos at type-check time too.
+Timespan = Literal[
+    "second", "minute", "hour", "day", "week", "month", "quarter", "year"
+]
+SortDirection = Literal["asc", "desc"]
 
 
 def get_market_snapshot(
@@ -240,4 +251,185 @@ def get_latest_market_snapshot(
         .sub_missing(missing_text="\u2014")
         .cols_align(align="left", columns=["Ticker"])
         .cols_align(align="right", columns=[*price_cols, volume_col])
+    )
+
+
+# -- OHLC bars for one ticker over a date range -----------------------
+
+
+def get_ohlc(
+    ticker: str,
+    from_: str | dt.date | dt.datetime,
+    to: str | dt.date | dt.datetime,
+    *,
+    timespan: Timespan = "day",
+    multiplier: int = 1,
+    adjusted: bool = True,
+    sort: SortDirection = "asc",
+    limit: int | None = None,
+    api_key: str | None = None,
+) -> pl.DataFrame:
+    """Return OHLC bars for *ticker* over a date range.
+
+    Calls the Massive ``get_aggs`` endpoint, which returns aggregated
+    bars at any window size: a 1-day bar, a 5-minute bar, a 4-hour bar,
+    a 1-week bar, etc.  The window size is *multiplier \u00d7 timespan*,
+    e.g. ``timespan="minute", multiplier=15`` for 15-minute bars.
+
+    Args:
+        ticker: Ticker symbol (case-insensitive on Massive's side).
+        from_: Start of the window.  Accepts ``"YYYY-MM-DD"``,
+            :class:`datetime.date`, :class:`datetime.datetime`, or a
+            Unix-millisecond integer (forwarded as-is to Massive).
+        to: End of the window.  Same accepted forms as *from_*.
+        timespan: Base unit.  One of ``"second"``, ``"minute"``,
+            ``"hour"``, ``"day"``, ``"week"``, ``"month"``,
+            ``"quarter"``, ``"year"``.  Defaults to ``"day"``.
+        multiplier: How many *timespan* units per bar.  Defaults to 1.
+        adjusted: Adjust prices for splits.  Defaults to *True*.
+        sort: ``"asc"`` (oldest first, default) or ``"desc"``.
+        limit: Cap on the number of base aggregates Massive queries to
+            build the result (Massive default is 5000, max 50000).
+            Defaults to *None* (use Massive's default).
+        api_key: Massive API key.  Falls back to ``MASSIVE_API_KEY``.
+
+    Returns:
+        A :class:`polars.DataFrame` with one row per bar and columns:
+
+        * ``Timestamp`` (Datetime, UTC) \u2014 bar's start time
+        * ``Open``, ``High``, ``Low``, ``Close`` (Float64)
+        * ``Volume`` (Float64) \u2014 Massive reports float for fractional
+          share trades
+        * ``VWAP`` (Float64, nullable \u2014 not all bars carry one)
+        * ``Transactions`` (Int64, nullable)
+
+        Rows are sorted in the requested direction.  An empty range
+        (e.g. weekend with daily bars) yields an empty frame with the
+        same schema.
+
+    Raises:
+        RuntimeError: If no API key is available.
+    """
+    upper = ticker.upper()
+    logger.info(
+        "Fetching OHLC for %s: %dx %s from %s to %s (adjusted=%s, sort=%s, limit=%s)",
+        upper,
+        multiplier,
+        timespan,
+        from_,
+        to,
+        adjusted,
+        sort,
+        limit,
+    )
+    client = get_client(api_key)
+
+    sort_value = Sort.ASC if sort == "asc" else Sort.DESC
+    if limit is None:
+        results = client.get_aggs(
+            upper,
+            multiplier,
+            timespan,
+            from_,
+            to,
+            adjusted=adjusted,
+            sort=sort_value,
+        )
+    else:
+        results = client.get_aggs(
+            upper,
+            multiplier,
+            timespan,
+            from_,
+            to,
+            adjusted=adjusted,
+            sort=sort_value,
+            limit=limit,
+        )
+
+    rows: list[dict[str, object]] = []
+    for bar in results:
+        if not isinstance(bar, Agg):
+            continue
+        ts = (
+            dt.datetime.fromtimestamp(bar.timestamp / 1000, tz=dt.UTC)
+            if bar.timestamp is not None
+            else None
+        )
+        rows.append(
+            {
+                "Timestamp": ts,
+                "Open": bar.open,
+                "High": bar.high,
+                "Low": bar.low,
+                "Close": bar.close,
+                "Volume": bar.volume,
+                "VWAP": bar.vwap,
+                "Transactions": bar.transactions,
+            }
+        )
+
+    logger.info("Collected %d bars for %s", len(rows), upper)
+
+    schema = {
+        "Timestamp": pl.Datetime("ms", time_zone="UTC"),
+        "Open": pl.Float64,
+        "High": pl.Float64,
+        "Low": pl.Float64,
+        "Close": pl.Float64,
+        "Volume": pl.Float64,
+        "VWAP": pl.Float64,
+        "Transactions": pl.Int64,
+    }
+    if not rows:
+        return pl.DataFrame(schema=schema)
+    return pl.DataFrame(rows, schema=schema)
+
+
+def get_ohlc_table(
+    ticker: str,
+    from_: str | dt.date | dt.datetime,
+    to: str | dt.date | dt.datetime,
+    *,
+    timespan: Timespan = "day",
+    multiplier: int = 1,
+    adjusted: bool = True,
+    sort: SortDirection = "asc",
+    limit: int | None = None,
+    api_key: str | None = None,
+) -> GT:
+    """Return :func:`get_ohlc` wrapped in a styled GT for display."""
+    df = get_ohlc(
+        ticker,
+        from_,
+        to,
+        timespan=timespan,
+        multiplier=multiplier,
+        adjusted=adjusted,
+        sort=sort,
+        limit=limit,
+        api_key=api_key,
+    )
+    bar_label = f"{multiplier} {timespan}{'s' if multiplier != 1 else ''}"
+    subtitle = f"{df.height} bars \u00b7 {bar_label} \u00b7 {from_} \u2192 {to}"
+    return (
+        GT(df)
+        .tab_header(title=f"{ticker.upper()} OHLC", subtitle=subtitle)
+        .fmt_number(columns=["Open", "High", "Low", "Close", "VWAP"], decimals=2)
+        .fmt_number(columns=["Volume"], compact=True, decimals=0)
+        .fmt_integer(columns=["Transactions"])
+        .sub_missing(missing_text="\u2014")
+        .cols_align(align="left", columns=["Timestamp"])
+        .cols_align(
+            align="right",
+            columns=[
+                "Open",
+                "High",
+                "Low",
+                "Close",
+                "Volume",
+                "VWAP",
+                "Transactions",
+            ],
+        )
     )

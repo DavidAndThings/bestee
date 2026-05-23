@@ -1,12 +1,20 @@
 """Tests for bestee.stocks.market."""
 
+import datetime as dt
 from unittest.mock import MagicMock, patch
 
+import polars as pl
 import pytest
 from great_tables import GT
 from massive.rest.models import Agg, GroupedDailyAgg, TickerSnapshot
+from massive.rest.models.common import Sort
 
-from bestee.stocks.market import get_latest_market_snapshot, get_market_snapshot
+from bestee.stocks.market import (
+    get_latest_market_snapshot,
+    get_market_snapshot,
+    get_ohlc,
+    get_ohlc_table,
+)
 
 _CLIENT_PATCH = "bestee.stocks.market.get_client"
 
@@ -282,3 +290,245 @@ class TestGetLatestMarketSnapshot:
 
         with pytest.raises(RuntimeError, match="trading date"):
             get_latest_market_snapshot()
+
+
+# ── Helpers for get_ohlc ───────────────────────────────────────────
+
+
+def _make_agg(
+    *,
+    timestamp: int | None = 1_736_172_000_000,  # 2025-01-06 14:00 UTC
+    open_: float | None = 100.0,
+    high: float | None = 102.0,
+    low: float | None = 99.5,
+    close: float | None = 101.0,
+    volume: float | None = 1_000_000.0,
+    vwap: float | None = 100.5,
+    transactions: int | None = 5000,
+) -> MagicMock:
+    mock = MagicMock(spec=Agg)
+    mock.timestamp = timestamp
+    mock.open = open_
+    mock.high = high
+    mock.low = low
+    mock.close = close
+    mock.volume = volume
+    mock.vwap = vwap
+    mock.transactions = transactions
+    mock.otc = None
+    return mock
+
+
+class TestGetOhlc:
+    @patch(_CLIENT_PATCH)
+    def test_returns_polars_dataframe_with_expected_schema(
+        self,
+        mock_get_client: MagicMock,
+    ) -> None:
+        mock_get_client.return_value.get_aggs.return_value = [_make_agg()]
+
+        df = get_ohlc("AAPL", "2025-01-01", "2025-01-31")
+
+        assert isinstance(df, pl.DataFrame)
+        assert df.columns == [
+            "Timestamp",
+            "Open",
+            "High",
+            "Low",
+            "Close",
+            "Volume",
+            "VWAP",
+            "Transactions",
+        ]
+        assert df.schema["Timestamp"] == pl.Datetime("ms", time_zone="UTC")
+        assert df.schema["Open"] == pl.Float64
+        assert df.schema["Volume"] == pl.Float64
+        assert df.schema["Transactions"] == pl.Int64
+
+    @patch(_CLIENT_PATCH)
+    def test_timestamp_converted_to_utc_datetime(
+        self,
+        mock_get_client: MagicMock,
+    ) -> None:
+        """Massive returns ms-epoch ints; we should expose a tz-aware datetime."""
+        # 2025-01-06 14:00:00 UTC = 1736172000000 ms
+        mock_get_client.return_value.get_aggs.return_value = [
+            _make_agg(timestamp=1_736_172_000_000)
+        ]
+
+        df = get_ohlc("AAPL", "2025-01-01", "2025-01-31")
+
+        ts = df["Timestamp"][0]
+        assert ts is not None
+        assert ts == dt.datetime(2025, 1, 6, 14, 0, tzinfo=dt.UTC)
+
+    @patch(_CLIENT_PATCH)
+    def test_defaults_send_day_bars_asc(
+        self,
+        mock_get_client: MagicMock,
+    ) -> None:
+        """Default call should request 1-day bars in ascending order."""
+        mock_get_client.return_value.get_aggs.return_value = []
+
+        get_ohlc("aapl", "2025-01-01", "2025-01-31")
+
+        mock_get_client.return_value.get_aggs.assert_called_once_with(
+            "AAPL",  # ticker uppercased
+            1,
+            "day",
+            "2025-01-01",
+            "2025-01-31",
+            adjusted=True,
+            sort=Sort.ASC,
+        )
+
+    @patch(_CLIENT_PATCH)
+    def test_custom_timespan_and_multiplier(
+        self,
+        mock_get_client: MagicMock,
+    ) -> None:
+        """timespan and multiplier should be forwarded as-is."""
+        mock_get_client.return_value.get_aggs.return_value = []
+
+        get_ohlc(
+            "TSLA",
+            "2025-01-06",
+            "2025-01-06",
+            timespan="minute",
+            multiplier=15,
+        )
+
+        call = mock_get_client.return_value.get_aggs.call_args
+        assert call.args[1:4] == (15, "minute", "2025-01-06")
+
+    @patch(_CLIENT_PATCH)
+    def test_sort_desc_forwarded(
+        self,
+        mock_get_client: MagicMock,
+    ) -> None:
+        mock_get_client.return_value.get_aggs.return_value = []
+
+        get_ohlc("AAPL", "2025-01-01", "2025-01-31", sort="desc")
+
+        assert mock_get_client.return_value.get_aggs.call_args.kwargs["sort"] == (
+            Sort.DESC
+        )
+
+    @patch(_CLIENT_PATCH)
+    def test_limit_only_included_when_set(
+        self,
+        mock_get_client: MagicMock,
+    ) -> None:
+        """``limit=None`` should not appear in the call kwargs — let Massive
+        use its own default."""
+        mock_get_client.return_value.get_aggs.return_value = []
+        get_ohlc("AAPL", "2025-01-01", "2025-01-31")
+        kwargs = mock_get_client.return_value.get_aggs.call_args.kwargs
+        assert "limit" not in kwargs
+
+        mock_get_client.reset_mock()
+        mock_get_client.return_value.get_aggs.return_value = []
+        get_ohlc("AAPL", "2025-01-01", "2025-01-31", limit=10_000)
+        kwargs = mock_get_client.return_value.get_aggs.call_args.kwargs
+        assert kwargs["limit"] == 10_000
+
+    @patch(_CLIENT_PATCH)
+    def test_adjusted_forwarded(
+        self,
+        mock_get_client: MagicMock,
+    ) -> None:
+        mock_get_client.return_value.get_aggs.return_value = []
+        get_ohlc("AAPL", "2025-01-01", "2025-01-31", adjusted=False)
+        assert (
+            mock_get_client.return_value.get_aggs.call_args.kwargs["adjusted"] is False
+        )
+
+    @patch(_CLIENT_PATCH)
+    def test_accepts_date_objects(
+        self,
+        mock_get_client: MagicMock,
+    ) -> None:
+        """``from_``/``to`` can be date or datetime; just forward them."""
+        mock_get_client.return_value.get_aggs.return_value = []
+
+        start = dt.date(2025, 1, 1)
+        end = dt.date(2025, 1, 31)
+        get_ohlc("AAPL", start, end)
+
+        args = mock_get_client.return_value.get_aggs.call_args.args
+        assert args[3] is start and args[4] is end
+
+    @patch(_CLIENT_PATCH)
+    def test_empty_range_returns_empty_frame_with_schema(
+        self,
+        mock_get_client: MagicMock,
+    ) -> None:
+        """A range with no bars still returns a typed empty DataFrame."""
+        mock_get_client.return_value.get_aggs.return_value = []
+
+        df = get_ohlc("AAPL", "2025-12-25", "2025-12-25")
+
+        assert df.height == 0
+        assert "Timestamp" in df.columns
+        assert df.schema["Open"] == pl.Float64
+
+    @patch(_CLIENT_PATCH)
+    def test_skips_non_agg_items_in_response(
+        self,
+        mock_get_client: MagicMock,
+    ) -> None:
+        """Defensive: anything that isn't an Agg should be ignored."""
+        mock_get_client.return_value.get_aggs.return_value = [
+            _make_agg(),
+            "garbage",  # type: ignore[list-item]
+            _make_agg(timestamp=1_736_258_400_000),
+        ]
+
+        df = get_ohlc("AAPL", "2025-01-01", "2025-01-31")
+        assert df.height == 2
+
+    @patch(_CLIENT_PATCH)
+    def test_null_timestamp_preserved_as_none(
+        self,
+        mock_get_client: MagicMock,
+    ) -> None:
+        mock_get_client.return_value.get_aggs.return_value = [_make_agg(timestamp=None)]
+
+        df = get_ohlc("AAPL", "2025-01-01", "2025-01-31")
+        assert df.height == 1
+        assert df["Timestamp"][0] is None
+
+
+class TestGetOhlcTable:
+    @patch(_CLIENT_PATCH)
+    def test_returns_gt(self, mock_get_client: MagicMock) -> None:
+        mock_get_client.return_value.get_aggs.return_value = [_make_agg()]
+        gt = get_ohlc_table("AAPL", "2025-01-01", "2025-01-31")
+        assert isinstance(gt, GT)
+
+    @patch(_CLIENT_PATCH)
+    def test_subtitle_reflects_timespan(
+        self,
+        mock_get_client: MagicMock,
+    ) -> None:
+        mock_get_client.return_value.get_aggs.return_value = [_make_agg()]
+        html = get_ohlc_table(
+            "AAPL",
+            "2025-01-01",
+            "2025-01-31",
+            timespan="hour",
+            multiplier=4,
+        ).as_raw_html()
+
+        assert "AAPL OHLC" in html
+        assert "4 hours" in html
+
+    @patch(_CLIENT_PATCH)
+    def test_subtitle_singular_for_multiplier_1(
+        self,
+        mock_get_client: MagicMock,
+    ) -> None:
+        mock_get_client.return_value.get_aggs.return_value = [_make_agg()]
+        html = get_ohlc_table("AAPL", "2025-01-01", "2025-01-31").as_raw_html()
+        assert "1 day" in html
+        assert "1 days" not in html
