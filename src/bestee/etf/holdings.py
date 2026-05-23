@@ -21,7 +21,13 @@ from typing import Any
 import polars as pl
 from great_tables import GT
 
-from bestee.etf import ishares, spdr, vaneck  # noqa: F401 — resolved via globals()
+from bestee.etf import (
+    invesco,  # noqa: F401 — resolved via globals()
+    ishares,  # noqa: F401 — resolved via globals()
+    roundhill,  # noqa: F401 — resolved via globals()
+    spdr,  # noqa: F401 — resolved via globals()
+    vaneck,  # noqa: F401 — resolved via globals()
+)
 from bestee.etf.issuer import guess_etf_issuer
 
 logger = logging.getLogger(__name__)
@@ -39,6 +45,8 @@ _PROVIDER_MODULES: dict[str, str] = {
     "VanEck": "vaneck",
     "SPDR": "spdr",
     "iShares": "ishares",
+    "Roundhill": "roundhill",
+    "Invesco": "invesco",
 }
 
 

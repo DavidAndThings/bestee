@@ -17,6 +17,8 @@ _GUESS_PATCH = "bestee.etf.holdings.guess_etf_issuer"
 _VANECK_PATCH = "bestee.etf.holdings.vaneck"
 _SPDR_PATCH = "bestee.etf.holdings.spdr"
 _ISHARES_PATCH = "bestee.etf.holdings.ishares"
+_ROUNDHILL_PATCH = "bestee.etf.holdings.roundhill"
+_INVESCO_PATCH = "bestee.etf.holdings.invesco"
 
 
 # ── Registry ─────────────────────────────────────────────────────────
@@ -27,6 +29,8 @@ def test_supported_issuers_includes_known_providers() -> None:
     assert "VanEck" in issuers
     assert "SPDR" in issuers
     assert "iShares" in issuers
+    assert "Roundhill" in issuers
+    assert "Invesco" in issuers
 
 
 # ── Successful dispatch ──────────────────────────────────────────────
@@ -118,15 +122,47 @@ def test_dispatches_to_ishares_for_ishares_etf(
     assert result is expected
 
 
+@patch(_ROUNDHILL_PATCH)
+@patch(_GUESS_PATCH)
+def test_dispatches_to_roundhill_for_roundhill_etf(
+    mock_guess: MagicMock,
+    mock_roundhill: MagicMock,
+) -> None:
+    mock_guess.return_value = "Roundhill"
+    expected = pl.DataFrame({"StockTicker": ["NVDA"]})
+    mock_roundhill.get_holdings.return_value = expected
+
+    result = get_holdings("CHAT")
+
+    mock_roundhill.get_holdings.assert_called_once_with("CHAT")
+    assert result is expected
+
+
+@patch(_INVESCO_PATCH)
+@patch(_GUESS_PATCH)
+def test_dispatches_to_invesco_for_invesco_etf(
+    mock_guess: MagicMock,
+    mock_invesco: MagicMock,
+) -> None:
+    mock_guess.return_value = "Invesco"
+    expected = pl.DataFrame({"Ticker": ["NVDA"]})
+    mock_invesco.get_holdings.return_value = expected
+
+    result = get_holdings("QQQ")
+
+    mock_invesco.get_holdings.assert_called_once_with("QQQ")
+    assert result is expected
+
+
 @patch(_GUESS_PATCH)
 def test_issuer_without_provider_raises(
     mock_guess: MagicMock,
 ) -> None:
     """Known issuer but no scraper registered → clear error mentioning the
     issuer and the list of supported ones."""
-    mock_guess.return_value = "Invesco"  # known by guess, no provider yet
-    with pytest.raises(IssuerNotSupportedError, match="Invesco"):
-        get_holdings("QQQ")
+    mock_guess.return_value = "Vanguard"  # known by guess, no provider yet
+    with pytest.raises(IssuerNotSupportedError, match="Vanguard"):
+        get_holdings("VOO")
 
 
 @patch(_GUESS_PATCH)

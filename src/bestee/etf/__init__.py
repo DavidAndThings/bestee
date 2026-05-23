@@ -16,7 +16,17 @@ ticker automatically::
     get_holdings("SPY")         # routes to bestee.etf.spdr.get_holdings
 """
 
-from bestee.etf import holdings, ishares, issuer, spdr, vaneck
+from bestee.etf import (
+    holdings,
+    invesco,
+    ishares,
+    issuer,
+    normalize,
+    pca,
+    roundhill,
+    spdr,
+    vaneck,
+)
 from bestee.etf.holdings import (
     IssuerNotSupportedError,
     get_holdings,
@@ -24,15 +34,25 @@ from bestee.etf.holdings import (
     supported_issuers,
 )
 from bestee.etf.issuer import guess_etf_issuer
+from bestee.etf.normalize import get_holdings_normalized, normalize_holdings
+from bestee.etf.pca import ETFPCAResult, etf_pca
 
 __all__ = [
+    "ETFPCAResult",
     "IssuerNotSupportedError",
+    "etf_pca",
     "get_holdings",
+    "get_holdings_normalized",
     "get_holdings_table",
     "guess_etf_issuer",
     "holdings",
+    "invesco",
     "ishares",
     "issuer",
+    "normalize",
+    "normalize_holdings",
+    "pca",
+    "roundhill",
     "spdr",
     "supported_issuers",
     "vaneck",

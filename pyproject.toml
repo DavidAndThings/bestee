@@ -8,6 +8,7 @@ dependencies = [
     "great-tables>=0.21.0",
     "httpx>=0.28.1",
     "massive>=2.7.0",
+    "numpy>=2.0",
     "polars>=1.40.1",
     "python-dotenv>=1.2.2",
 ]
