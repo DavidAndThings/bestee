@@ -10,18 +10,17 @@ from great_tables import GT
 
 import bestee.resources
 from bestee.stocks import columns as cols
+from bestee.stocks.builder import ProcessingLevelError, decorator_builder
 from bestee.stocks.decorators import (
     ComputedMetricDecorator,
     FinancialsDecorator,
     NoUpstreamError,
-    ProcessingLevelError,
     SameSICategoryDecorator,
     TableDecorator,
     TickerSummaryDecorator,
     TimeSeriesCacheDecorator,
     TimeSeriesDerivedDecorator,
     TimeSeriesMetricDecorator,
-    decorator_builder,
 )
 from bestee.stocks.models import (
     FinancialMetric,
@@ -833,7 +832,7 @@ class TestTimeSeriesDsl:
         # Build chain by walking the level-3 processor directly with a
         # stub upstream — sidesteps the network calls a full STOCKS
         # stage would make.
-        from bestee.stocks.decorators import command_processor_level_three
+        from bestee.stocks.builder import command_processor_level_three
 
         upstream = _StubUpstream(
             pl.DataFrame({cols.TICKER: ["LINEAR", "CONST", "TOO_SHORT"]})
@@ -1075,7 +1074,7 @@ class TestTimeSeriesDerivedDsl:
                 "LastValue", lambda s: float(s[-1]) if s else None
             )
             # Build the same chain as the prompt, but on top of a stub.
-            from bestee.stocks.decorators import command_processor_level_three
+            from bestee.stocks.builder import command_processor_level_three
 
             upstream = _StubUpstream(pl.DataFrame({cols.TICKER: ["AAPL", "MSFT"]}))
             decorator: TableDecorator | None = upstream

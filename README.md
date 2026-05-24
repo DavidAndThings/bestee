@@ -52,7 +52,7 @@ COMPUTED_METRIC gross_margin gp / rev
 ```
 
 ```python
-from bestee.stocks.decorators import decorator_builder
+from bestee.stocks.builder import decorator_builder
 
 commands = [line.split() for line in script.splitlines() if line.strip()]
 pipeline = decorator_builder(commands)

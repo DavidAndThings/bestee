@@ -9,12 +9,23 @@ Submodules:
 * :mod:`bestee.stocks.models` — :class:`Metric` / :class:`FinancialMetric`
   data models.
 * :mod:`bestee.stocks.columns` — shared column-name constants.
-* :mod:`bestee.stocks.decorators` — DSL-driven table-pipeline stages.
+* :mod:`bestee.stocks.decorators` — pipeline stages (table decorators).
+* :mod:`bestee.stocks.builder` — DSL → decorator-chain builder.
 """
 
-from bestee.stocks import columns, decorators, financials, market, models, sic, tickers
+from bestee.stocks import (
+    builder,
+    columns,
+    decorators,
+    financials,
+    market,
+    models,
+    sic,
+    tickers,
+)
 
 __all__ = [
+    "builder",
     "columns",
     "decorators",
     "financials",
