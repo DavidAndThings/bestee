@@ -2,17 +2,25 @@ from __future__ import annotations
 
 import ast
 import logging
-import re
+import operator
 from abc import ABC, abstractmethod
-from collections.abc import Sequence
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
+import numpy as np
 import polars as pl
 from great_tables import GT
 
 from bestee.stocks import columns as cols
 from bestee.stocks.financials import build_financials_df
-from bestee.stocks.models import FinancialMetric, Metric, TimeSeriesDef
+from bestee.stocks.market import get_time_series
+from bestee.stocks.models import (
+    FinancialMetric,
+    Metric,
+    TimeSeriesDef,
+    TimeSeriesName,
+    TimeSeriesSpan,
+)
 from bestee.stocks.tickers import get_all_tickers_df, get_ticker_details_df
 
 logger = logging.getLogger(__name__)
@@ -144,23 +152,56 @@ class SameSICategoryDecorator(TableDecorator):
 
 
 class FinancialsDecorator(TableDecorator):
+    """Add named financial-metric columns from a single batched API call.
+
+    The DSL form is ``FINANCIAL_METRIC <name> <metric> <year> <quarter>``
+    where ``<name>`` is the user-supplied column header that downstream
+    ``COMPUTED_METRIC`` lines reference.  All metrics added before
+    :meth:`_build_df` are fetched in one round-trip and then renamed
+    from the SDK's default ``"<base_label> (FY… Q…)"`` form to the
+    user's name.
+    """
+
     def __init__(self, upstream: TableDecorator):
         super().__init__(upstream)
-        self.metrics: list[FinancialMetric] = []
+        # Order matters for stable column ordering in the joined frame.
+        self._named_metrics: dict[str, FinancialMetric] = {}
 
-    def add_metric(self, metric: FinancialMetric):
-        self.metrics.append(metric)
+    @property
+    def metrics(self) -> list[FinancialMetric]:
+        """The bare metric requests (without names) — useful for tests
+        that just want to see what got registered."""
+        return list(self._named_metrics.values())
+
+    def add_metric(self, name: str, metric: FinancialMetric) -> None:
+        """Register *metric* under *name*.
+
+        Raises:
+            ValueError: If *name* is already defined on this decorator
+                (the DSL forbids duplicate ``FINANCIAL_METRIC`` names so
+                downstream references resolve unambiguously).
+        """
+        if name in self._named_metrics:
+            msg = f"FINANCIAL_METRIC name {name!r} is already defined"
+            raise ValueError(msg)
+        self._named_metrics[name] = metric
 
     def _build_df(self) -> pl.DataFrame:
         upstream_df = self._build_upstream_df()
 
         # No metrics requested — pass the upstream through untouched
         # so we don't make a wasted API call.
-        if not self.metrics:
+        if not self._named_metrics:
             return upstream_df
 
         tickers: list[str] = upstream_df[cols.TICKER].to_list()
-        metrics_df = build_financials_df(tickers=tickers, metrics=self.metrics)
+        ordered_names = list(self._named_metrics)
+        ordered_metrics = [self._named_metrics[n] for n in ordered_names]
+        metrics_df = build_financials_df(tickers=tickers, metrics=ordered_metrics)
+        # Re-label each column from the SDK's auto-generated metric.label
+        # to the user-supplied name.
+        rename_map = {self._named_metrics[name].label: name for name in ordered_names}
+        metrics_df = metrics_df.rename(rename_map)
         # Polars DataFrames support .join(); GT objects do not.
         return upstream_df.join(metrics_df, on=cols.TICKER, how="inner")
 
@@ -171,7 +212,8 @@ class FinancialsDecorator(TableDecorator):
             .tab_header(
                 title="Tickers with Financial Metrics",
                 subtitle=(
-                    f"{df.height} tickers · {len(self.metrics)} financial metric(s)"
+                    f"{df.height} tickers · {len(self._named_metrics)} "
+                    "financial metric(s)"
                 ),
             )
             .sub_missing(missing_text="—")
@@ -179,149 +221,98 @@ class FinancialsDecorator(TableDecorator):
 
 
 class ComputedMetricDecorator(TableDecorator):
-    """Add a computed-metric column derived from an arithmetic expression.
+    """Add a computed-metric column derived from a Python-arithmetic expression.
 
-    Supports a small DSL of the form::
+    DSL: ``COMPUTED_METRIC <name> <expression>``.  *expression* is a
+    plain Python arithmetic expression whose identifiers reference
+    upstream columns — typically those added by ``FINANCIAL_METRIC``
+    lines (each labelled with its user-supplied name) or earlier
+    ``COMPUTED_METRIC`` lines.  Allowed operators: ``+ - * / ** %``,
+    unary ``±`` and parens; numeric literals are fine.
 
-        COMPUTED_METRIC <NAME> <expression>
+    Example::
 
-    where ``<expression>`` may reference any number of financial metrics
-    via::
-
-        FINANCIAL_METRIC <metric_name> <fiscal_year> <fiscal_quarter>
-
-    and may also reference **previously-computed columns** in the
-    upstream table via::
-
-        COMPUTED_METRIC <NAME>
-
-    (no body — just the two tokens).  This lets you chain decorators::
-
+        # After FINANCIAL_METRIC fm2 NET_INCOME 2025 4
+        #       FINANCIAL_METRIC fm3 TOTAL_ASSETS 2025 4
+        #       FINANCIAL_METRIC fm4 TOTAL_ASSETS 2025 3
         deco = ComputedMetricDecorator(
-            "COMPUTED_METRIC ROA "
-            "(FINANCIAL_METRIC NET_INCOME 2025 4) / "
-            "(FINANCIAL_METRIC TOTAL_ASSETS 2025 4)",
-            upstream=base,
-        )
-        deco = ComputedMetricDecorator(
-            "COMPUTED_METRIC DOUBLED_ROA (COMPUTED_METRIC ROA) * 2",
-            upstream=deco,
+            name="cm1",
+            expression="(fm2 * 2) / (fm3 + fm4)",
+            upstream=fin_decorator,
         )
 
-    Expressions combine these references with the standard arithmetic
-    operators (``+ - * / ** %``), unary minus, parentheses, and numeric
-    literals.
-
-    Evaluation is done by parsing the expression with :mod:`ast` rather
-    than ``eval``, so no arbitrary code can run.  Tickers for which any
-    referenced metric is missing receive ``None`` in the new column.
+    Evaluation parses with :mod:`ast` rather than ``eval``, so no
+    arbitrary code can run; the AST is validated against an allow-list
+    of node types at construction time.  Per-ticker, ``None``
+    propagates cleanly for any missing operand, divide-by-zero, or
+    modulo-by-zero so a single bad data point doesn't sink the column.
     """
 
-    # Top-level expression: COMPUTED_METRIC <name> <body>
-    _COMPUTED_METRIC_RE = re.compile(
-        r"^\s*COMPUTED_METRIC\s+(\w+)\s+(.+)$",
-        re.DOTALL,
+    _ALLOWED_BINOPS: tuple[type[ast.operator], ...] = (
+        ast.Add,
+        ast.Sub,
+        ast.Mult,
+        ast.Div,
+        ast.Pow,
+        ast.Mod,
     )
-    # Inline financial-metric reference.
-    _FM_RE = re.compile(r"FINANCIAL_METRIC\s+(\w+)\s+(\d+)\s+(\d+)")
-    # Inline computed-metric reference — just the name, no body.
-    _CM_REF_RE = re.compile(r"COMPUTED_METRIC\s+(\w+)")
+    _ALLOWED_UNARYOPS: tuple[type[ast.unaryop], ...] = (ast.UAdd, ast.USub)
 
-    def __init__(self, expression: str, upstream: TableDecorator):
+    def __init__(self, name: str, expression: str, upstream: TableDecorator):
         super().__init__(upstream)
-        self.expression = expression
-        (
-            self._metric_label,
-            self._fm_references,
-            self._cm_references,
-            self._ast_tree,
-        ) = self._parse(expression)
-        logger.info(
-            "ComputedMetricDecorator parsed %r → "
-            "%d FINANCIAL_METRIC ref(s), %d COMPUTED_METRIC ref(s)",
-            self._metric_label,
-            len(self._fm_references),
-            len(self._cm_references),
-        )
-
-    # ── Parsing ──────────────────────────────────────────────────────
-
-    @classmethod
-    def _parse(
-        cls,
-        expression: str,
-    ) -> tuple[str, list[FinancialMetric], list[str], ast.Expression]:
-        """Parse the DSL expression.
-
-        Returns:
-            A 4-tuple of ``(column_label, fm_refs, cm_refs, ast_tree)``
-            where *cm_refs* is the list of upstream column names (already
-            capitalized) referenced via ``COMPUTED_METRIC <NAME>``.
-        """
-        match = cls._COMPUTED_METRIC_RE.match(expression)
-        if match is None:
-            msg = (
-                f"Invalid expression: {expression!r}\n"
-                "Expected: 'COMPUTED_METRIC <NAME> <arithmetic_expression>'"
-            )
-            raise ValueError(msg)
-
-        name = match.group(1)
-        body = match.group(2)
-
-        # Column label uses Python's .capitalize() so 'RETURN_ON_ASSETS'
-        # becomes 'Return_on_assets'.
-        column_label = name.capitalize()
-
-        fm_refs: list[FinancialMetric] = []
-        cm_refs: list[str] = []
-
-        def _sub_fm(match: re.Match[str]) -> str:
-            metric_token = match.group(1)
-            fiscal_year = int(match.group(2))
-            fiscal_quarter = int(match.group(3))
-            try:
-                metric_enum = Metric[metric_token]
-            except KeyError as err:
-                msg = (
-                    f"Unknown metric: {metric_token!r}. "
-                    f"Available metrics: {sorted(m.name for m in Metric)}"
-                )
-                raise ValueError(msg) from err
-            fm = FinancialMetric(
-                metric=metric_enum,
-                fiscal_year=fiscal_year,
-                fiscal_quarter=fiscal_quarter,
-            )
-            placeholder = f"_v{len(fm_refs)}"
-            fm_refs.append(fm)
-            return placeholder
-
-        def _sub_cm(match: re.Match[str]) -> str:
-            # The referenced column was created by an earlier
-            # ComputedMetricDecorator whose name was passed through
-            # .capitalize() — do the same here for lookup.
-            ref_column = match.group(1).capitalize()
-            placeholder = f"_c{len(cm_refs)}"
-            cm_refs.append(ref_column)
-            return placeholder
-
-        # Substitute FINANCIAL_METRIC first; it has more arguments
-        # so substituting it first won't affect the CM regex.
-        substituted = cls._FM_RE.sub(_sub_fm, body)
-        substituted = cls._CM_REF_RE.sub(_sub_cm, substituted)
-
+        self._name = name
+        self._expression = expression
         try:
-            tree = ast.parse(substituted, mode="eval")
+            self._ast_tree = ast.parse(expression, mode="eval").body
         except SyntaxError as err:
             msg = (
-                f"Invalid arithmetic expression: {body!r}\n"
-                f"After substitution: {substituted!r}\n"
-                f"Parser error: {err.msg}"
+                f"COMPUTED_METRIC expression {expression!r} is not "
+                f"valid Python syntax: {err.msg}"
             )
             raise ValueError(msg) from err
+        self._validate(self._ast_tree)
+        self._referenced_names: list[str] = sorted(self._collect_names(self._ast_tree))
+        logger.info(
+            "ComputedMetricDecorator %r references %d name(s): %s",
+            self._name,
+            len(self._referenced_names),
+            self._referenced_names,
+        )
 
-        return column_label, fm_refs, cm_refs, tree
+    # ── Parsing helpers ──────────────────────────────────────────────
+
+    @classmethod
+    def _collect_names(cls, node: ast.AST) -> set[str]:
+        return {sub.id for sub in ast.walk(node) if isinstance(sub, ast.Name)}
+
+    @classmethod
+    def _validate(cls, node: ast.AST) -> None:
+        """Walk the AST and raise on anything outside the allowed subset."""
+        for sub in ast.walk(node):
+            if isinstance(sub, ast.Name):
+                continue
+            if isinstance(sub, ast.Constant):
+                if not isinstance(sub.value, int | float):
+                    msg = (
+                        f"COMPUTED_METRIC constants must be numeric, got {sub.value!r}"
+                    )
+                    raise ValueError(msg)
+                continue
+            if isinstance(sub, ast.UnaryOp) and isinstance(
+                sub.op, cls._ALLOWED_UNARYOPS
+            ):
+                continue
+            if isinstance(sub, ast.BinOp) and isinstance(sub.op, cls._ALLOWED_BINOPS):
+                continue
+            if isinstance(sub, ast.Expression):
+                continue
+            if isinstance(sub, ast.operator | ast.unaryop | ast.expr_context):
+                continue
+            msg = (
+                "COMPUTED_METRIC expression contains an unsupported "
+                f"construct: {type(sub).__name__}"
+            )
+            raise ValueError(msg)
 
     # ── Safe AST evaluation ──────────────────────────────────────────
 
@@ -393,57 +384,22 @@ class ComputedMetricDecorator(TableDecorator):
 
     def _build_df(self) -> pl.DataFrame:
         upstream_df = self._build_upstream_df()
-        tickers: list[str] = upstream_df[cols.TICKER].to_list()
 
-        # Verify all upstream column references exist before doing work.
-        missing = [c for c in self._cm_references if c not in upstream_df.columns]
+        missing = [n for n in self._referenced_names if n not in upstream_df.columns]
         if missing:
             msg = (
-                f"COMPUTED_METRIC reference(s) {missing!r} not found in "
-                f"upstream table. Available columns: {upstream_df.columns}"
+                f"COMPUTED_METRIC {self._name!r} expression references "
+                f"unknown name(s) {missing!r}. "
+                f"Available columns: {upstream_df.columns}."
             )
             raise ValueError(msg)
 
-        # Build a lookup: ticker -> {placeholder_name -> value}
-        env_per_ticker: dict[str, dict[str, float | None]] = {t: {} for t in tickers}
-
-        # 1. Populate _v placeholders from a single financials API call.
-        if self._fm_references:
-            metrics_df = build_financials_df(
-                tickers=tickers,
-                metrics=self._fm_references,
-            )
-            for row in metrics_df.iter_rows(named=True):
-                ticker = row[cols.TICKER]
-                env = env_per_ticker.setdefault(ticker, {})
-                for i, fm in enumerate(self._fm_references):
-                    raw: Any = row.get(fm.label)
-                    env[f"_v{i}"] = float(raw) if raw is not None else None
-
-        # 2. Populate _c placeholders from the upstream DataFrame.
-        if self._cm_references:
-            for row in upstream_df.iter_rows(named=True):
-                ticker = row[cols.TICKER]
-                env = env_per_ticker.setdefault(ticker, {})
-                for i, ref_col in enumerate(self._cm_references):
-                    raw = row.get(ref_col)
-                    env[f"_c{i}"] = float(raw) if raw is not None else None
-
-        # Tickers with no inputs at all — surface this in logs to
-        # distinguish "missing data" from a deliberate null result.
-        empty_input_tickers = [t for t in tickers if not env_per_ticker.get(t)]
-        if empty_input_tickers:
-            logger.debug(
-                "%d ticker(s) had no inputs for %r: %s",
-                len(empty_input_tickers),
-                self._metric_label,
-                empty_input_tickers,
-            )
-
-        # Evaluate the expression once per ticker.
         computed: list[float | None] = []
-        for ticker in tickers:
-            env = env_per_ticker.get(ticker, {})
+        for row in upstream_df.iter_rows(named=True):
+            env: dict[str, float | None] = {}
+            for n in self._referenced_names:
+                raw = row.get(n)
+                env[n] = float(raw) if raw is not None else None
             try:
                 value = self._evaluate(self._ast_tree, env)
             except (TypeError, ZeroDivisionError, OverflowError):
@@ -452,13 +408,13 @@ class ComputedMetricDecorator(TableDecorator):
 
         logger.info(
             "Computed %r for %d tickers (%d non-null)",
-            self._metric_label,
+            self._name,
             len(computed),
             sum(1 for v in computed if v is not None),
         )
 
         return upstream_df.with_columns(
-            pl.Series(name=self._metric_label, values=computed, dtype=pl.Float64)
+            pl.Series(name=self._name, values=computed, dtype=pl.Float64)
         )
 
     def build(self) -> GT:
@@ -466,21 +422,343 @@ class ComputedMetricDecorator(TableDecorator):
         return (
             GT(df)
             .tab_header(
-                title=f"With Computed Metric: {self._metric_label}",
+                title=f"With Computed Metric: {self._name}",
                 subtitle=f"{df.height} tickers",
             )
             .sub_missing(missing_text="—")
         )
 
 
-_NUM_PROCESSING_LEVELS = 3
+class TimeSeriesCacheDecorator(TableDecorator):
+    """Side-channel stage that memoises one ``TimeSeriesDef``'s fetches.
+
+    Inserted between two stages, it leaves the tabular pipeline
+    unchanged (``_build_df`` and ``build`` pass straight through to
+    the upstream), but intercepts the chain-walking
+    :meth:`TableDecorator.get_time_series` call so downstream
+    consumers share a single network round-trip per ticker.
+
+    A cache only serves the ``TimeSeriesDef`` it was created with —
+    requests for other definitions fall through to upstream stages.
+    """
+
+    def __init__(
+        self, ts_def: TimeSeriesDef, upstream_decorator: TableDecorator | None = None
+    ):
+        super().__init__(upstream_decorator)
+        self._ts_def = ts_def
+        self._cache: dict[str, Sequence[float]] = {}
+
+    def _build_df(self) -> pl.DataFrame:
+        return self._build_upstream_df()
+
+    def build(self) -> GT:
+        if self._upstream is None:
+            raise NoUpstreamError("TimeSeriesCacheDecorator has no upstream to render")
+        return self._upstream.build()
+
+    def _get_time_series(self, ticker: str, ts_def: TimeSeriesDef) -> Sequence[float]:
+        if ts_def != self._ts_def:
+            raise NotImplementedError
+        if ticker in self._cache:
+            return self._cache[ticker]
+        values = get_time_series(ticker, self._ts_def)
+        self._cache[ticker] = values
+        return values
+
+
+# ── Scalar reducers over a time series ───────────────────────────────
+
+
+type TimeSeriesScalarMetric = Callable[[Sequence[float]], float | None]
+"""A function that reduces a time series to one scalar (or ``None``)."""
+
+
+def _rsquared_trend(series: Sequence[float]) -> float | None:
+    """R² of a least-squares linear fit of *series* against its index.
+
+    Equivalent to the squared Pearson correlation between the bar
+    index (0, 1, 2, …) and the value at that bar.  A series that
+    trends perfectly linearly scores 1.0; a flat or noisy series
+    scores near 0.
+
+    Returns ``None`` for series too short to fit (< 2 points) or with
+    zero variance (constant series — R² is undefined).
+    """
+    arr = np.asarray(series, dtype=np.float64)
+    if arr.size < 2:
+        return None
+    # Short-circuit on a constant series — np.corrcoef would emit a
+    # divide-by-zero RuntimeWarning and return NaN here.
+    if arr.var() == 0.0:
+        return None
+    xs = np.arange(arr.size, dtype=np.float64)
+    r = np.corrcoef(xs, arr)[0, 1]
+    if not np.isfinite(r):
+        return None
+    return float(r * r)
+
+
+_TIME_SERIES_METRICS: dict[str, TimeSeriesScalarMetric] = {
+    "RSquared": _rsquared_trend,
+}
+
+
+def register_time_series_metric(name: str, fn: TimeSeriesScalarMetric) -> None:
+    """Register a scalar reducer so it's callable from the DSL or directly.
+
+    Once registered, ``TimeSeriesMetricDecorator(metric=name, ...)``
+    and ``TIME_SERIES_METRIC <name> <ts>`` in the builder DSL both
+    pick *fn* up by name.  Names are matched case-sensitively to
+    match the DSL surface.
+
+    Args:
+        name: Public name (and resulting column header).
+        fn: ``(Sequence[float]) -> float | None`` reducer.  Return
+            ``None`` to signal "no value" — the column dtype is
+            ``Float64`` so nulls flow through naturally.
+    """
+    _TIME_SERIES_METRICS[name] = fn
+
+
+def available_time_series_metrics() -> list[str]:
+    """Return the names of all registered scalar reducers, sorted."""
+    return sorted(_TIME_SERIES_METRICS)
+
+
+class TimeSeriesDerivedDecorator(TableDecorator):
+    """Define a new time series as arithmetic over previously-declared ones.
+
+    Drop-in pass-through for the tabular pipeline (``_build_df`` and
+    ``build`` delegate to the upstream), but exposes a fresh series
+    via the chain-walking :meth:`TableDecorator.get_time_series` hook.
+    Downstream stages (typically a :class:`TimeSeriesMetricDecorator`)
+    read the derived series by its own :class:`TimeSeriesDef` exactly
+    like any other producer.
+
+    Expressions are restricted to ``+``, ``-``, ``*``, ``/``, unary
+    minus, and numeric constants over the named operand series.
+    Element-wise evaluation goes through numpy so scalar broadcasting
+    works (``2*ts1 - ts2``).  Operand series must align bar-by-bar —
+    when they don't, numpy raises during the first ticker's fetch and
+    the error surfaces with the offending pair.
+    """
+
+    _ALLOWED_BINOPS: tuple[type[ast.operator], ...] = (
+        ast.Add,
+        ast.Sub,
+        ast.Mult,
+        ast.Div,
+    )
+    _BINOP_FUNCS: dict[type[ast.operator], Callable[[Any, Any], Any]] = {
+        ast.Add: operator.add,
+        ast.Sub: operator.sub,
+        ast.Mult: operator.mul,
+        ast.Div: operator.truediv,
+    }
+
+    def __init__(
+        self,
+        derived_ts_def: TimeSeriesDef,
+        expression: str,
+        operand_ts_defs: Mapping[str, TimeSeriesDef],
+        upstream_decorator: TableDecorator,
+    ):
+        super().__init__(upstream_decorator)
+        self._ts_def = derived_ts_def
+        self._expression = expression
+        try:
+            self._ast_tree = ast.parse(expression, mode="eval").body
+        except SyntaxError as err:
+            msg = (
+                f"TIME_SERIES_DERIVED expression {expression!r} is not "
+                f"valid Python syntax: {err.msg}"
+            )
+            raise ValueError(msg) from err
+        # Validate AST early so a typo doesn't only surface mid-build.
+        self._validate(self._ast_tree)
+        self._operand_names = sorted(self._collect_names(self._ast_tree))
+        missing = [n for n in self._operand_names if n not in operand_ts_defs]
+        if missing:
+            msg = (
+                f"TIME_SERIES_DERIVED expression {expression!r} refers to "
+                f"undefined names {missing!r}. "
+                f"Defined: {sorted(operand_ts_defs)}."
+            )
+            raise ValueError(msg)
+        self._operand_ts_defs: dict[str, TimeSeriesDef] = {
+            n: operand_ts_defs[n] for n in self._operand_names
+        }
+        self._cache: dict[str, list[float]] = {}
+
+    @classmethod
+    def _collect_names(cls, node: ast.AST) -> set[str]:
+        return {sub.id for sub in ast.walk(node) if isinstance(sub, ast.Name)}
+
+    @classmethod
+    def _validate(cls, node: ast.AST) -> None:
+        """Walk the AST and raise on anything outside the allowed subset."""
+        for sub in ast.walk(node):
+            if isinstance(sub, ast.Name):
+                continue
+            if isinstance(sub, ast.Constant):
+                if not isinstance(sub.value, int | float):
+                    msg = (
+                        "TIME_SERIES_DERIVED constants must be numeric, "
+                        f"got {sub.value!r}"
+                    )
+                    raise ValueError(msg)
+                continue
+            if isinstance(sub, ast.UnaryOp) and isinstance(sub.op, ast.USub):
+                continue
+            if isinstance(sub, ast.BinOp) and isinstance(sub.op, cls._ALLOWED_BINOPS):
+                continue
+            if isinstance(sub, ast.Expression):
+                continue
+            if isinstance(sub, ast.operator | ast.unaryop | ast.expr_context):
+                # AST visits operators and load/store contexts on their
+                # own; the BinOp/UnaryOp/Name checks above cover their
+                # enclosing nodes, so a bare visit here is fine.
+                continue
+            msg = (
+                "TIME_SERIES_DERIVED expression contains an unsupported "
+                f"construct: {type(sub).__name__}"
+            )
+            raise ValueError(msg)
+
+    def _build_df(self) -> pl.DataFrame:
+        return self._build_upstream_df()
+
+    def build(self) -> GT:
+        if self._upstream is None:
+            raise NoUpstreamError(
+                "TimeSeriesDerivedDecorator has no upstream to render"
+            )
+        return self._upstream.build()
+
+    def _get_time_series(self, ticker: str, ts_def: TimeSeriesDef) -> Sequence[float]:
+        if ts_def != self._ts_def:
+            raise NotImplementedError
+        if ticker in self._cache:
+            return self._cache[ticker]
+        if self._upstream is None:
+            raise NoUpstreamError(
+                "TimeSeriesDerivedDecorator needs an upstream to fetch operands"
+            )
+        operands: dict[str, np.ndarray] = {
+            name: np.asarray(
+                self._upstream.get_time_series(ticker, self._operand_ts_defs[name]),
+                dtype=np.float64,
+            )
+            for name in self._operand_names
+        }
+        result = self._evaluate(self._ast_tree, operands)
+        values: list[float] = np.asarray(result, dtype=np.float64).tolist()
+        self._cache[ticker] = values
+        return values
+
+    @classmethod
+    def _evaluate(
+        cls,
+        node: ast.AST,
+        operands: Mapping[str, np.ndarray],
+    ) -> Any:
+        if isinstance(node, ast.Name):
+            return operands[node.id]
+        if isinstance(node, ast.Constant) and isinstance(node.value, int | float):
+            return float(node.value)
+        if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.USub):
+            return -cls._evaluate(node.operand, operands)
+        if isinstance(node, ast.BinOp) and isinstance(node.op, cls._ALLOWED_BINOPS):
+            left = cls._evaluate(node.left, operands)
+            right = cls._evaluate(node.right, operands)
+            return cls._BINOP_FUNCS[type(node.op)](left, right)
+        # Should never hit this branch — _validate ran at construction
+        # time — but keep the message friendly if it ever does.
+        msg = (
+            "TIME_SERIES_DERIVED expression contains an unsupported "
+            f"construct at runtime: {type(node).__name__}"
+        )
+        raise ValueError(msg)
+
+
+class TimeSeriesMetricDecorator(TableDecorator):
+    """Add a named scalar column derived from a per-ticker time series.
+
+    For every ticker in the upstream table, pulls the series via
+    :meth:`TableDecorator.get_time_series` (which walks the chain to a
+    producer — typically :class:`TimeSeriesCacheDecorator`) and
+    applies a named scalar reducer from
+    :data:`_TIME_SERIES_METRICS` (e.g. ``"RSquared"``).  The reducer's
+    return value lands in a new ``Float64`` column carrying the
+    user-supplied *name*, mirroring how ``FINANCIAL_METRIC`` and
+    ``COMPUTED_METRIC`` lines label their output.
+
+    Register additional reducers via
+    :func:`register_time_series_metric`.  Wrap with a
+    :class:`TimeSeriesCacheDecorator` upstream so the network is hit
+    once per ticker even when several metric columns share a series.
+    """
+
+    def __init__(
+        self,
+        ts_def: TimeSeriesDef,
+        upstream_decorator: TableDecorator,
+        *,
+        name: str,
+        metric: str,
+    ):
+        super().__init__(upstream_decorator)
+        if metric not in _TIME_SERIES_METRICS:
+            msg = (
+                f"Unknown time-series metric {metric!r}. "
+                f"Available: {available_time_series_metrics()}."
+            )
+            raise ValueError(msg)
+        self._ts_def = ts_def
+        self._name = name
+        self._metric_name = metric
+        self._metric_fn = _TIME_SERIES_METRICS[metric]
+
+    def _build_df(self) -> pl.DataFrame:
+        upstream_df = self._build_upstream_df()
+        tickers: list[str] = upstream_df[cols.TICKER].to_list()
+        values: list[float | None] = []
+        for ticker in tickers:
+            series = self.get_time_series(ticker, self._ts_def)
+            values.append(self._metric_fn(series))
+        logger.info(
+            "Computed %r (metric=%r) for %d tickers (%d non-null)",
+            self._name,
+            self._metric_name,
+            len(values),
+            sum(1 for v in values if v is not None),
+        )
+        return upstream_df.with_columns(
+            pl.Series(name=self._name, values=values, dtype=pl.Float64)
+        )
+
+    def build(self) -> GT:
+        df = self._build_df()
+        return (
+            GT(df)
+            .tab_header(
+                title=(f"With Time-Series Metric: {self._name} ({self._metric_name})"),
+                subtitle=f"{df.height} tickers",
+            )
+            .sub_missing(missing_text="—")
+        )
+
+
+_NUM_PROCESSING_LEVELS = 4
 
 
 def decorator_builder(commands: Sequence[Command]) -> TableDecorator:
     """Build a chained :class:`TableDecorator` from a sequence of commands.
 
-    Commands are processed in three logical phases so that ordering in
-    the input is irrelevant:
+    Commands are processed in four logical phases so that ordering
+    across phases in the input is irrelevant (ordering *within* the
+    TIME_SERIES phase still matters, since references resolve by name):
 
     * **Level 0** — ``STOCKS``, ``SAME_SIC_CATEGORY_AS``
       (set up the base table and any filtering)
@@ -490,6 +768,14 @@ def decorator_builder(commands: Sequence[Command]) -> TableDecorator:
     * **Level 2** — ``COMPUTED_METRIC``
       (each command becomes its own :class:`ComputedMetricDecorator`,
       chained on top of the previous one)
+    * **Level 3** — ``TIME_SERIES`` / ``TIME_SERIES_DERIVED`` /
+      ``TIME_SERIES_METRIC``
+      (``TIME_SERIES`` declarations create a
+      :class:`TimeSeriesCacheDecorator` and register the series under
+      a name; ``TIME_SERIES_DERIVED`` builds a new named series as
+      arithmetic over existing ones; ``TIME_SERIES_METRIC`` references
+      any of those names to attach a
+      :class:`TimeSeriesMetricDecorator` column)
 
     Args:
         commands: Each command is a sequence of whitespace-separated
@@ -537,6 +823,9 @@ def decorator_builder_one_pass(
     # Level 1 accumulates FINANCIAL_METRIC commands into a single
     # FinancialsDecorator so that downstream API calls are batched.
     fin_decorator: FinancialsDecorator | None = None
+    # Level 3 needs to remember TimeSeriesDefs by name so a later
+    # TIME_SERIES_METRIC in the same pass can reference them.
+    ts_defs: dict[str, TimeSeriesDef] = {}
 
     for command in commands:
         match processing_level:
@@ -548,6 +837,10 @@ def decorator_builder_one_pass(
                 )
             case 2:
                 status, decorator = command_processor_level_two(command, decorator)
+            case 3:
+                status, decorator, ts_defs = command_processor_level_three(
+                    command, decorator, ts_defs
+                )
             case _:
                 msg = f"Invalid processing level: {processing_level}"
                 raise ProcessingLevelError(msg)
@@ -580,30 +873,58 @@ def command_processor_level_one(
     decorator: TableDecorator | None,
     fin_decorator: FinancialsDecorator | None,
 ) -> tuple[int, TableDecorator | None, FinancialsDecorator | None]:
-    """Handle FINANCIAL_METRIC commands, accumulating into one decorator."""
+    """Handle named ``FINANCIAL_METRIC`` commands.
+
+    Form: ``FINANCIAL_METRIC <name> <metric> <fiscal_year> <fiscal_quarter>``.
+    The first ``FINANCIAL_METRIC`` instantiates a shared
+    :class:`FinancialsDecorator`; subsequent ones register more named
+    metrics on the same decorator so a single API call covers all of
+    them.  Downstream ``COMPUTED_METRIC`` lines reference the metric by
+    *name* (e.g. ``fm1``).
+    """
     match command[0]:
         case "FINANCIAL_METRIC":
+            if len(command) != 5:
+                msg = (
+                    "FINANCIAL_METRIC requires 4 arguments: "
+                    "<name> <metric> <fiscal_year> <fiscal_quarter>"
+                )
+                raise ProcessingLevelError(msg)
             if fin_decorator is None:
                 if decorator is None:
                     msg = "FINANCIAL_METRIC requires an upstream (use STOCKS first)"
                     raise ProcessingLevelError(msg)
                 fin_decorator = FinancialsDecorator(upstream=decorator)
                 decorator = fin_decorator
+            name, metric_token, year_token, quarter_token = command[1:5]
             try:
-                metric_enum = Metric[command[1]]
+                metric_enum = Metric[metric_token]
             except KeyError as err:
                 msg = (
-                    f"Unknown FINANCIAL_METRIC name: {command[1]!r}. "
+                    f"Unknown FINANCIAL_METRIC metric: {metric_token!r}. "
                     f"Available: {sorted(m.name for m in Metric)}"
                 )
                 raise ProcessingLevelError(msg) from err
-            fin_decorator.add_metric(
-                FinancialMetric(
-                    metric=metric_enum,
-                    fiscal_year=int(command[2]),
-                    fiscal_quarter=int(command[3]),
+            try:
+                fiscal_year = int(year_token)
+                fiscal_quarter = int(quarter_token)
+            except ValueError as err:
+                msg = (
+                    "FINANCIAL_METRIC fiscal_year and fiscal_quarter must be "
+                    f"integers, got year={year_token!r} quarter={quarter_token!r}"
                 )
-            )
+                raise ProcessingLevelError(msg) from err
+            try:
+                fin_decorator.add_metric(
+                    name=name,
+                    metric=FinancialMetric(
+                        metric=metric_enum,
+                        fiscal_year=fiscal_year,
+                        fiscal_quarter=fiscal_quarter,
+                    ),
+                )
+            except ValueError as err:
+                raise ProcessingLevelError(str(err)) from err
             return 1, decorator, fin_decorator
         case _:
             return 0, decorator, fin_decorator
@@ -613,16 +934,197 @@ def command_processor_level_two(
     command: Command,
     decorator: TableDecorator | None,
 ) -> tuple[int, TableDecorator | None]:
-    """Handle COMPUTED_METRIC commands, each as its own chained decorator."""
+    """Handle named ``COMPUTED_METRIC`` commands.
+
+    Form: ``COMPUTED_METRIC <name> <expression>``.  The expression is
+    plain Python arithmetic over upstream column names (e.g. the
+    ``fm…`` names declared by earlier ``FINANCIAL_METRIC`` lines, or
+    other ``COMPUTED_METRIC`` names defined upstream in the same
+    pipeline).
+    """
     match command[0]:
         case "COMPUTED_METRIC":
             if decorator is None:
                 msg = "COMPUTED_METRIC requires an upstream (use STOCKS first)"
                 raise ProcessingLevelError(msg)
-            # The original whitespace-separated expression is rebuilt
-            # by joining the tokens with single spaces.  The DSL parser
-            # is tolerant of extra spaces (uses ``\s+``).
-            expression = " ".join(command)
-            return 1, ComputedMetricDecorator(upstream=decorator, expression=expression)
+            if len(command) < 3:
+                msg = (
+                    "COMPUTED_METRIC requires at least 2 arguments: <name> <expression>"
+                )
+                raise ProcessingLevelError(msg)
+            name = command[1]
+            # Tokens 2.. are the whitespace-tokenised expression; rejoin
+            # with single spaces — ast.parse is tolerant of whitespace.
+            expression = " ".join(command[2:])
+            try:
+                metric_decorator = ComputedMetricDecorator(
+                    name=name, expression=expression, upstream=decorator
+                )
+            except ValueError as err:
+                raise ProcessingLevelError(str(err)) from err
+            return 1, metric_decorator
         case _:
             return 0, decorator
+
+
+def command_processor_level_three(
+    command: Command,
+    decorator: TableDecorator | None,
+    ts_defs: dict[str, TimeSeriesDef],
+) -> tuple[int, TableDecorator | None, dict[str, TimeSeriesDef]]:
+    """Handle TIME_SERIES (cache), TIME_SERIES_DERIVED (synthesised),
+    and TIME_SERIES_METRIC (column) commands.
+
+    Within a single ``decorator_builder`` pass, ``TIME_SERIES`` lines
+    register a named :class:`TimeSeriesDef` (and chain a
+    :class:`TimeSeriesCacheDecorator` so the data is fetched once),
+    ``TIME_SERIES_DERIVED`` lines define a new named series as
+    arithmetic over previously-declared ones (chaining a
+    :class:`TimeSeriesDerivedDecorator`), and ``TIME_SERIES_METRIC``
+    lines reference any of those names to attach a
+    :class:`TimeSeriesMetricDecorator` column.  Names disambiguate
+    chain-walking lookups via the ``TimeSeriesDef.tag`` field.
+    """
+    match command[0]:
+        case "TIME_SERIES":
+            if decorator is None:
+                msg = "TIME_SERIES requires an upstream (use STOCKS first)"
+                raise ProcessingLevelError(msg)
+            # name field start end span multiplier
+            if len(command) != 7:
+                msg = (
+                    "TIME_SERIES requires 6 arguments: "
+                    "<name> <ohlc_field> <start> <end> <span> <multiplier>"
+                )
+                raise ProcessingLevelError(msg)
+            name, field, start, end, span_token, multiplier_token = command[1:7]
+            if name in ts_defs:
+                msg = f"TIME_SERIES name {name!r} is already defined"
+                raise ProcessingLevelError(msg)
+            try:
+                ts_name = TimeSeriesName(field)
+            except ValueError as err:
+                msg = (
+                    f"Unknown TIME_SERIES field {field!r}. "
+                    f"Available: {sorted(n.value for n in TimeSeriesName)}"
+                )
+                raise ProcessingLevelError(msg) from err
+            try:
+                ts_span = TimeSeriesSpan(span_token)
+            except ValueError as err:
+                msg = (
+                    f"Unknown TIME_SERIES span {span_token!r}. "
+                    f"Available: {sorted(s.value for s in TimeSeriesSpan)}"
+                )
+                raise ProcessingLevelError(msg) from err
+            try:
+                multiplier = int(multiplier_token)
+            except ValueError as err:
+                msg = (
+                    "TIME_SERIES multiplier must be an integer, "
+                    f"got {multiplier_token!r}"
+                )
+                raise ProcessingLevelError(msg) from err
+            ts_def = TimeSeriesDef(
+                name=ts_name,
+                span=ts_span,
+                start=start,
+                end=end,
+                multiplier=multiplier,
+                tag=name,
+            )
+            ts_defs = {**ts_defs, name: ts_def}
+            return (
+                1,
+                TimeSeriesCacheDecorator(ts_def, upstream_decorator=decorator),
+                ts_defs,
+            )
+        case "TIME_SERIES_DERIVED":
+            if decorator is None:
+                msg = "TIME_SERIES_DERIVED requires an upstream (use STOCKS first)"
+                raise ProcessingLevelError(msg)
+            if len(command) != 3:
+                msg = "TIME_SERIES_DERIVED requires 2 arguments: <name> <expression>"
+                raise ProcessingLevelError(msg)
+            derived_name, expression = command[1], command[2]
+            if derived_name in ts_defs:
+                msg = f"TIME_SERIES_DERIVED name {derived_name!r} is already defined"
+                raise ProcessingLevelError(msg)
+            try:
+                parsed = ast.parse(expression, mode="eval").body
+            except SyntaxError as err:
+                msg = (
+                    f"TIME_SERIES_DERIVED expression {expression!r} is not "
+                    f"valid Python syntax: {err.msg}"
+                )
+                raise ProcessingLevelError(msg) from err
+            ref_names = sorted(TimeSeriesDerivedDecorator._collect_names(parsed))
+            if not ref_names:
+                msg = (
+                    f"TIME_SERIES_DERIVED expression {expression!r} "
+                    "must reference at least one TIME_SERIES name"
+                )
+                raise ProcessingLevelError(msg)
+            unknown = [n for n in ref_names if n not in ts_defs]
+            if unknown:
+                msg = (
+                    f"TIME_SERIES_DERIVED refers to undefined names {unknown!r}. "
+                    f"Defined: {sorted(ts_defs)}."
+                )
+                raise ProcessingLevelError(msg)
+            # Synthesize a TimeSeriesDef for the derived series.  Shape
+            # is copied from the first operand (operands must align for
+            # arithmetic to make sense — the derived decorator's
+            # element-wise eval will fail with a clear numpy error if
+            # operands don't broadcast).
+            first_operand = ts_defs[ref_names[0]]
+            derived_ts = TimeSeriesDef(
+                name=first_operand.name,
+                span=first_operand.span,
+                start=first_operand.start,
+                end=first_operand.end,
+                multiplier=first_operand.multiplier,
+                tag=derived_name,
+            )
+            ts_defs = {**ts_defs, derived_name: derived_ts}
+            try:
+                derived_decorator = TimeSeriesDerivedDecorator(
+                    derived_ts_def=derived_ts,
+                    expression=expression,
+                    operand_ts_defs=ts_defs,
+                    upstream_decorator=decorator,
+                )
+            except ValueError as err:
+                raise ProcessingLevelError(str(err)) from err
+            return 1, derived_decorator, ts_defs
+        case "TIME_SERIES_METRIC":
+            if decorator is None:
+                msg = "TIME_SERIES_METRIC requires an upstream (use STOCKS first)"
+                raise ProcessingLevelError(msg)
+            if len(command) != 4:
+                msg = (
+                    "TIME_SERIES_METRIC requires 3 arguments: <name> <metric> <ts_name>"
+                )
+                raise ProcessingLevelError(msg)
+            column_name, metric_name, ts_name_ref = command[1], command[2], command[3]
+            ts_def = ts_defs.get(ts_name_ref)
+            if ts_def is None:
+                msg = (
+                    f"TIME_SERIES_METRIC refers to undefined name {ts_name_ref!r}. "
+                    f"Defined: {sorted(ts_defs)}"
+                )
+                raise ProcessingLevelError(msg)
+            try:
+                metric_decorator = TimeSeriesMetricDecorator(
+                    ts_def,
+                    upstream_decorator=decorator,
+                    name=column_name,
+                    metric=metric_name,
+                )
+            except ValueError as err:
+                # Surface unknown-metric errors at pipeline-build time
+                # with the same exception type as other DSL failures.
+                raise ProcessingLevelError(str(err)) from err
+            return 1, metric_decorator, ts_defs
+        case _:
+            return 0, decorator, ts_defs

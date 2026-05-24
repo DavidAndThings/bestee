@@ -206,10 +206,20 @@ class TimeSeriesName(Enum):
     CLOSE_PRICE = "close_price"
 
 
-@dataclass
+@dataclass(frozen=True)
 class TimeSeriesDef:
     name: TimeSeriesName
     span: TimeSeriesSpan
     start: str | dt.date | dt.datetime
     end: str | dt.date | dt.datetime
     multiplier: int = 1
+    tag: str | None = None
+    """Optional symbolic name for chain-walking disambiguation.
+
+    The decorator pipeline routes time-series requests by
+    ``TimeSeriesDef`` equality, so two definitions that share OHLC
+    parameters but represent semantically different series (e.g. a raw
+    ``ts1`` and a derived ``ts3 = ts2 - ts1`` whose shape was copied
+    from ``ts1``) would otherwise collide.  Setting ``tag`` to a
+    unique string makes them unequal.
+    """
