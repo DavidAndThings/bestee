@@ -31,7 +31,6 @@ from __future__ import annotations
 
 import ast
 from collections.abc import Callable, Sequence
-from enum import StrEnum
 
 from bestee.stocks.decorators import (
     AppendTablesDecorator,
@@ -47,6 +46,7 @@ from bestee.stocks.decorators import (
     TimeSeriesMetricDecorator,
 )
 from bestee.stocks.models import (
+    CommandHeader,
     FinancialMetric,
     Metric,
     TimeSeriesDef,
@@ -60,24 +60,6 @@ type DecoratorBuilder = Callable[[Sequence[Command]], Sequence[TableDecorator]]
 
 class ProcessingLevelError(Exception):
     """Raised for any DSL parsing / dispatch failure."""
-
-
-class CommandHeader(StrEnum):
-    """All DSL command keywords.
-
-    Subclassing :class:`StrEnum` makes each member ``==`` the same
-    string value, so ``match c[0]: case CommandHeader.X:`` works
-    directly against the tokenised input.
-    """
-
-    ASSET_SCOPE = "ASSET_SCOPE"
-    SAME_SIC_CATEGORY_AS = "SAME_SIC_CATEGORY_AS"
-    PICK_TICKERS = "PICK_TICKERS"
-    FINANCIAL_METRIC = "FINANCIAL_METRIC"
-    COMPUTED_METRIC = "COMPUTED_METRIC"
-    TIME_SERIES = "TIME_SERIES"
-    TIME_SERIES_DERIVED = "TIME_SERIES_DERIVED"
-    TIME_SERIES_METRIC = "TIME_SERIES_METRIC"
 
 
 # ── Phase 1: subsetting (SAME_SIC, PICK_TICKERS) ─────────────────────

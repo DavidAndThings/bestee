@@ -2,7 +2,7 @@
 
 import datetime as dt
 from dataclasses import dataclass
-from enum import Enum
+from enum import Enum, StrEnum
 
 
 class StatementType(Enum):
@@ -223,3 +223,21 @@ class TimeSeriesDef:
     from ``ts1``) would otherwise collide.  Setting ``tag`` to a
     unique string makes them unequal.
     """
+
+
+class CommandHeader(StrEnum):
+    """All DSL command keywords.
+
+    Subclassing :class:`StrEnum` makes each member ``==`` the same
+    string value, so ``match c[0]: case CommandHeader.X:`` works
+    directly against the tokenised input.
+    """
+
+    ASSET_SCOPE = "ASSET_SCOPE"
+    SAME_SIC_CATEGORY_AS = "SAME_SIC_CATEGORY_AS"
+    PICK_TICKERS = "PICK_TICKERS"
+    FINANCIAL_METRIC = "FINANCIAL_METRIC"
+    COMPUTED_METRIC = "COMPUTED_METRIC"
+    TIME_SERIES = "TIME_SERIES"
+    TIME_SERIES_DERIVED = "TIME_SERIES_DERIVED"
+    TIME_SERIES_METRIC = "TIME_SERIES_METRIC"
