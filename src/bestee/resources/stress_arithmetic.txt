@@ -1,0 +1,17 @@
+ASSET_SCOPE STOCKS
+SAME_SIC_CATEGORY_AS AAPL
+FINANCIAL_METRIC rev REVENUE 2024 4
+FINANCIAL_METRIC ni NET_INCOME 2024 4
+FINANCIAL_METRIC ebitda EBITDA 2024 4
+FINANCIAL_METRIC assets TOTAL_ASSETS 2024 4
+FINANCIAL_METRIC equity TOTAL_EQUITY 2024 4
+COMPUTED_METRIC neg_ni -ni
+COMPUTED_METRIC double_rev rev * 2
+COMPUTED_METRIC half_assets assets / 2
+COMPUTED_METRIC squared_margin (ni / rev) ** 2
+COMPUTED_METRIC mod_remainder rev % 1000
+COMPUTED_METRIC nested_parens ((((ni)))) * 1.5
+COMPUTED_METRIC mixed_signs -ni + +rev - -(ebitda)
+COMPUTED_METRIC compound (ni * 2) / (equity + assets)
+COMPUTED_METRIC ratio_of_ratios (ni / rev) / (assets / equity)
+COMPUTED_METRIC alphabeta (3.14 * rev) - (2.71 * ni)

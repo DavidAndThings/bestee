@@ -68,7 +68,7 @@ def parse_sheet(
             if c.attrib.get("t") == "s":
                 try:
                     cells[col_idx] = shared[int(v.text)]
-                except (ValueError, IndexError):
+                except ValueError, IndexError:
                     cells[col_idx] = ""
             else:
                 cells[col_idx] = v.text

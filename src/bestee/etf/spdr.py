@@ -61,7 +61,7 @@ def _parse_shares(s: str) -> int | None:
         return None
     try:
         return int(round(v))
-    except (ValueError, OverflowError):
+    except ValueError, OverflowError:
         return None
 
 

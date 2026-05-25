@@ -125,7 +125,7 @@ def _load_bundled_cache() -> list[dict[str, str]] | None:
     try:
         ref = importlib.resources.files(bestee.resources).joinpath("sic_codes.json")
         data = json.loads(ref.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    except OSError, json.JSONDecodeError:
         logger.warning("Failed to read bundled SIC cache")
         return None
     rows = _validate_cache_rows(data)
@@ -146,7 +146,7 @@ def _load_cache() -> list[dict[str, str]] | None:
     if _USER_CACHE.is_file():
         try:
             data = json.loads(_USER_CACHE.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
+        except OSError, json.JSONDecodeError:
             logger.warning("Failed to read user cache at %s", _USER_CACHE)
         else:
             rows = _validate_cache_rows(data)

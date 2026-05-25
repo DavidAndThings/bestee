@@ -1,0 +1,14 @@
+ASSET_SCOPE STOCKS
+SAME_SIC_CATEGORY_AS AAPL
+TIME_SERIES ts_close close_price 2024-01-01 2025-01-01 day 1
+TIME_SERIES ts_open  open_price  2024-01-01 2025-01-01 day 1
+TIME_SERIES ts_high  high_price  2024-01-01 2025-01-01 day 1
+TIME_SERIES ts_low   low_price   2024-01-01 2025-01-01 day 1
+TIME_SERIES_DERIVED daily_range ts_high - ts_low
+TIME_SERIES_DERIVED daily_change ts_close - ts_open
+TIME_SERIES_DERIVED midprice (ts_high + ts_low) / 2
+TIME_SERIES_DERIVED log_like (ts_close - ts_open) / ts_open
+TIME_SERIES_METRIC range_trend RSquared daily_range
+TIME_SERIES_METRIC change_trend RSquared daily_change
+TIME_SERIES_METRIC mid_trend RSquared midprice
+TIME_SERIES_METRIC close_trend RSquared ts_close

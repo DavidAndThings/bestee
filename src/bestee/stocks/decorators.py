@@ -26,6 +26,10 @@ class NoUpstreamError(Exception):
     pass
 
 
+class TimeSeriesNotAvailableError(Exception):
+    pass
+
+
 class TableDecorator(ABC):
     """Base class for pipeline stages that produce a tabular result.
 
@@ -35,49 +39,71 @@ class TableDecorator(ABC):
     a styled :class:`GT` for end-user display.
     """
 
-    def __init__(self, upstream_decorator: TableDecorator | None = None):
-        self._upstream = upstream_decorator
+    def __init__(self, upstream_decorators: Sequence[TableDecorator] | None = None):
+        self._upstream = upstream_decorators
 
-    def _build_upstream_df(self) -> pl.DataFrame:
-        """Return the upstream stage's DataFrame, or raise if none."""
+    def _build_from_upstream(self) -> pl.DataFrame:
+        """Return the combined upstream DataFrame.
+
+        Default supports the common single-upstream case by delegating
+        to that upstream's :meth:`_build_df`.  Subclasses with multiple
+        upstreams (fan-in) override this to combine them.
+
+        Callers should prefer :meth:`_build_from_upstream_or_error`,
+        which checks for an empty / missing upstream chain first; this
+        method assumes ``self._upstream`` is a non-empty sequence.
+        """
+        assert self._upstream is not None
+        if len(self._upstream) == 1:
+            return self._upstream[0]._build_df()
+        msg = (
+            f"{type(self).__name__} has {len(self._upstream)} upstreams; "
+            "override _build_from_upstream to combine them."
+        )
+        raise NotImplementedError(msg)
+
+    def _build_from_upstream_or_error(self) -> pl.DataFrame:
+        """Return the combined upstream DataFrame, or raise if none."""
         if self._upstream is None:
             raise NoUpstreamError("No upstream decorator")
-        return self._upstream._build_df()
+        return self._build_from_upstream()
 
     @abstractmethod
     def _build_df(self) -> pl.DataFrame:
-        """Return the stage's output as a Polars DataFrame (no styling)."""
+        """Return this stage's output as a Polars DataFrame (no styling)."""
 
     @abstractmethod
     def build(self) -> GT:
-        """Return the stage's output as a styled Great Tables object."""
+        """Return this stage's output as a styled Great Tables object."""
 
-    def _get_time_series(self, ticker: str, ts_def: TimeSeriesDef) -> Sequence[float]:
-        """Return the time series for *ticker* if this stage knows how.
+    def get_time_series_from_upstream(
+        self, ticker: str, ts_def: TimeSeriesDef
+    ) -> Sequence[float]:
+        """Walk the upstream(s) looking for one that can serve *ts_def*.
 
-        Stages that don't supply time-series data should leave the
-        default — it raises :class:`NotImplementedError`, which lets
-        :meth:`get_time_series` fall back to the upstream stage.
+        Each upstream gets a try; ones that raise
+        :class:`TimeSeriesNotAvailableError` are skipped.  If none
+        serve it, propagates the same exception.
         """
-        raise NotImplementedError
+        for decorator in self._upstream or []:
+            try:
+                return decorator.get_time_series(ticker, ts_def)
+            except TimeSeriesNotAvailableError:
+                continue
+        raise TimeSeriesNotAvailableError
 
     def get_time_series(self, ticker: str, ts_def: TimeSeriesDef) -> Sequence[float]:
-        """Walk the decorator chain until a stage can serve the series.
+        """Return the time series for *ticker*.
 
-        Each stage gets a chance to provide the data via
-        :meth:`_get_time_series`; on :class:`NotImplementedError` the
-        call delegates upstream.  If no stage in the chain implements
-        it, the original :class:`NotImplementedError` propagates.
+        Default delegates to upstream via
+        :meth:`get_time_series_from_upstream`.  Stages that actually
+        produce series (e.g. :class:`TimeSeriesCacheDecorator`,
+        :class:`TimeSeriesDerivedDecorator`) override this.
         """
-        try:
-            return self._get_time_series(ticker, ts_def)
-        except NotImplementedError:
-            if self._upstream is not None:
-                return self._upstream.get_time_series(ticker, ts_def)
-            raise
+        return self.get_time_series_from_upstream(ticker, ts_def)
 
 
-class TickerSummaryDecorator(TableDecorator):
+class AssetScopeDecorator(TableDecorator):
     def __init__(
         self,
         ticker_type: str,
@@ -103,12 +129,12 @@ class TickerSummaryDecorator(TableDecorator):
 
 
 class SameSICategoryDecorator(TableDecorator):
-    def __init__(self, ticker: str, upstream: TableDecorator):
+    def __init__(self, ticker: str, *upstream: TableDecorator):
         super().__init__(upstream)
         self.ticker = ticker
 
     def _build_df(self) -> pl.DataFrame:
-        df = self._build_upstream_df()
+        df = self._build_from_upstream_or_error()
 
         # Locate the target ticker's SIC code.
         target_rows = df.filter(pl.col(cols.TICKER) == self.ticker)
@@ -141,21 +167,94 @@ class SameSICategoryDecorator(TableDecorator):
         )
 
 
+class PickTickersDecorator(TableDecorator):
+    """Config-only marker that registers a ticker list for a downstream
+    :class:`FinancialsDecorator` to fetch metrics for."""
+
+    def __init__(self, tickers: Sequence[str], *upstream: TableDecorator):
+        super().__init__(upstream)
+        self.tickers = tickers
+
+    def _build_df(self) -> pl.DataFrame:
+        df = self._build_from_upstream_or_error()
+        return df.filter(pl.col(cols.TICKER).is_in(self.tickers))
+
+    def build(self) -> GT:
+        return GT(self._build_df())
+
+
+class AppendTablesDecorator(TableDecorator):
+    """Append multiple upstream tables vertically into one DataFrame."""
+
+    def __init__(self, *upstream: TableDecorator):
+        super().__init__(upstream)
+
+    def _build_df(self) -> pl.DataFrame:
+        assert self._upstream is not None, (
+            "AppendTablesDecorator requires upstream decorators"
+        )
+        dfs = [upstream._build_df() for upstream in self._upstream]
+        return pl.concat(dfs)
+
+    def build(self) -> GT:
+        return GT(self._build_df())
+
+
+class FinancialMetricCacheDecorator(TableDecorator):
+    """Config-only marker that registers one ``(name, FinancialMetric)``
+    pair for a downstream :class:`FinancialsDecorator` to batch-fetch.
+
+    It's a :class:`TableDecorator` subclass purely so it can be passed
+    alongside the table-providing upstream in
+    ``FinancialsDecorator(*upstream)``; it doesn't itself build a
+    DataFrame.  Calling :meth:`_build_df` or :meth:`build` on it
+    directly is a programmer error.
+    """
+
+    def __init__(
+        self, metric_name: str, metric: FinancialMetric, *upstream: TableDecorator
+    ):
+        super().__init__(upstream)
+        self.metric_name = metric_name
+        self.metric = metric
+
+    def _build_df(self) -> pl.DataFrame:
+        msg = (
+            "FinancialMetricCacheDecorator is a config-only stage; pass it "
+            "as an upstream to a FinancialsDecorator instead of building it "
+            "directly."
+        )
+        raise NoUpstreamError(msg)
+
+    def build(self) -> GT:
+        return GT(self._build_df())
+
+
 class FinancialsDecorator(TableDecorator):
     """Add named financial-metric columns from a single batched API call.
 
-    The DSL form is ``FINANCIAL_METRIC <name> <metric> <year> <quarter>``
-    where ``<name>`` is the user-supplied column header that downstream
-    ``COMPUTED_METRIC`` lines reference.  All metrics added before
-    :meth:`_build_df` are fetched in one round-trip and then renamed
-    from the SDK's default ``"<base_label> (FY… Q…)"`` form to the
-    user's name.
+    Constructed with a mix of upstreams: exactly one
+    table-providing decorator (the chain head) plus zero or more
+    :class:`FinancialMetricCacheDecorator` instances that declare which
+    ``(name, FinancialMetric)`` pairs to fetch.  All metrics are
+    fetched in one ``build_financials_df`` round-trip and joined to
+    the upstream table, with each column renamed from the SDK's
+    default ``"<base_label> (FY… Q…)"`` form to the user's name.
     """
 
-    def __init__(self, upstream: TableDecorator):
+    def __init__(self, *upstream: TableDecorator):
         super().__init__(upstream)
-        # Order matters for stable column ordering in the joined frame.
-        self._named_metrics: dict[str, FinancialMetric] = {}
+
+    @property
+    def _named_metrics(self) -> dict[str, FinancialMetric]:
+        assert self._upstream is not None, (
+            "upstream_decorators must be provided for the FinancialsDecorator"
+        )
+        named_metrics: dict[str, FinancialMetric] = {}
+        for decorator in self._upstream:
+            if isinstance(decorator, FinancialMetricCacheDecorator):
+                named_metrics[decorator.metric_name] = decorator.metric
+        return named_metrics
 
     @property
     def metrics(self) -> list[FinancialMetric]:
@@ -163,21 +262,28 @@ class FinancialsDecorator(TableDecorator):
         that just want to see what got registered."""
         return list(self._named_metrics.values())
 
-    def add_metric(self, name: str, metric: FinancialMetric) -> None:
-        """Register *metric* under *name*.
+    def _build_from_upstream(self) -> pl.DataFrame:
+        """Pick the lone table upstream out of the mix and build it.
 
-        Raises:
-            ValueError: If *name* is already defined on this decorator
-                (the DSL forbids duplicate ``FINANCIAL_METRIC`` names so
-                downstream references resolve unambiguously).
+        The cache upstreams are config-only and don't contribute to
+        the table — they're consumed via :attr:`_named_metrics`.
         """
-        if name in self._named_metrics:
-            msg = f"FINANCIAL_METRIC name {name!r} is already defined"
+        assert self._upstream is not None
+        table_upstreams = [
+            d
+            for d in self._upstream
+            if not isinstance(d, FinancialMetricCacheDecorator)
+        ]
+        if len(table_upstreams) != 1:
+            msg = (
+                "FinancialsDecorator expects exactly one non-cache upstream "
+                f"to provide the table; got {len(table_upstreams)}."
+            )
             raise ValueError(msg)
-        self._named_metrics[name] = metric
+        return table_upstreams[0]._build_df()
 
     def _build_df(self) -> pl.DataFrame:
-        upstream_df = self._build_upstream_df()
+        upstream_df = self._build_from_upstream_or_error()
 
         # No metrics requested — pass the upstream through untouched
         # so we don't make a wasted API call.
@@ -248,7 +354,7 @@ class ComputedMetricDecorator(TableDecorator):
     )
     _ALLOWED_UNARYOPS: tuple[type[ast.unaryop], ...] = (ast.UAdd, ast.USub)
 
-    def __init__(self, name: str, expression: str, upstream: TableDecorator):
+    def __init__(self, name: str, expression: str, *upstream: TableDecorator):
         super().__init__(upstream)
         self._name = name
         self._expression = expression
@@ -373,7 +479,7 @@ class ComputedMetricDecorator(TableDecorator):
     # ── Build ────────────────────────────────────────────────────────
 
     def _build_df(self) -> pl.DataFrame:
-        upstream_df = self._build_upstream_df()
+        upstream_df = self._build_from_upstream_or_error()
 
         missing = [n for n in self._referenced_names if n not in upstream_df.columns]
         if missing:
@@ -432,24 +538,20 @@ class TimeSeriesCacheDecorator(TableDecorator):
     requests for other definitions fall through to upstream stages.
     """
 
-    def __init__(
-        self, ts_def: TimeSeriesDef, upstream_decorator: TableDecorator | None = None
-    ):
-        super().__init__(upstream_decorator)
+    def __init__(self, ts_def: TimeSeriesDef, *upstream: TableDecorator):
+        super().__init__(upstream)
         self._ts_def = ts_def
         self._cache: dict[str, Sequence[float]] = {}
 
     def _build_df(self) -> pl.DataFrame:
-        return self._build_upstream_df()
+        return self._build_from_upstream_or_error()
 
     def build(self) -> GT:
-        if self._upstream is None:
-            raise NoUpstreamError("TimeSeriesCacheDecorator has no upstream to render")
-        return self._upstream.build()
+        return GT(self._build_df())
 
-    def _get_time_series(self, ticker: str, ts_def: TimeSeriesDef) -> Sequence[float]:
+    def get_time_series(self, ticker: str, ts_def: TimeSeriesDef) -> Sequence[float]:
         if ts_def != self._ts_def:
-            raise NotImplementedError
+            return self.get_time_series_from_upstream(ticker, ts_def)
         if ticker in self._cache:
             return self._cache[ticker]
         values = get_time_series(ticker, self._ts_def)
@@ -552,9 +654,9 @@ class TimeSeriesDerivedDecorator(TableDecorator):
         derived_ts_def: TimeSeriesDef,
         expression: str,
         operand_ts_defs: Mapping[str, TimeSeriesDef],
-        upstream_decorator: TableDecorator,
+        *upstream_decorators: TableDecorator,
     ):
-        super().__init__(upstream_decorator)
+        super().__init__(upstream_decorators)
         self._ts_def = derived_ts_def
         self._expression = expression
         try:
@@ -617,18 +719,14 @@ class TimeSeriesDerivedDecorator(TableDecorator):
             raise ValueError(msg)
 
     def _build_df(self) -> pl.DataFrame:
-        return self._build_upstream_df()
+        return self._build_from_upstream_or_error()
 
     def build(self) -> GT:
-        if self._upstream is None:
-            raise NoUpstreamError(
-                "TimeSeriesDerivedDecorator has no upstream to render"
-            )
-        return self._upstream.build()
+        return GT(self._build_df())
 
-    def _get_time_series(self, ticker: str, ts_def: TimeSeriesDef) -> Sequence[float]:
+    def get_time_series(self, ticker: str, ts_def: TimeSeriesDef) -> Sequence[float]:
         if ts_def != self._ts_def:
-            raise NotImplementedError
+            return self.get_time_series_from_upstream(ticker, ts_def)
         if ticker in self._cache:
             return self._cache[ticker]
         if self._upstream is None:
@@ -637,7 +735,7 @@ class TimeSeriesDerivedDecorator(TableDecorator):
             )
         operands: dict[str, np.ndarray] = {
             name: np.asarray(
-                self._upstream.get_time_series(ticker, self._operand_ts_defs[name]),
+                self.get_time_series_from_upstream(ticker, self._operand_ts_defs[name]),
                 dtype=np.float64,
             )
             for name in self._operand_names
@@ -693,12 +791,11 @@ class TimeSeriesMetricDecorator(TableDecorator):
     def __init__(
         self,
         ts_def: TimeSeriesDef,
-        upstream_decorator: TableDecorator,
-        *,
         name: str,
         metric: str,
+        *upstream_decorators: TableDecorator,
     ):
-        super().__init__(upstream_decorator)
+        super().__init__(upstream_decorators)
         if metric not in _TIME_SERIES_METRICS:
             msg = (
                 f"Unknown time-series metric {metric!r}. "
@@ -711,7 +808,7 @@ class TimeSeriesMetricDecorator(TableDecorator):
         self._metric_fn = _TIME_SERIES_METRICS[metric]
 
     def _build_df(self) -> pl.DataFrame:
-        upstream_df = self._build_upstream_df()
+        upstream_df = self._build_from_upstream_or_error()
         tickers: list[str] = upstream_df[cols.TICKER].to_list()
         values: list[float | None] = []
         for ticker in tickers:
