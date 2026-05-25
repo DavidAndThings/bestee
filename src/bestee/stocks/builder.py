@@ -62,6 +62,16 @@ class ProcessingLevelError(Exception):
     """Raised for any DSL parsing / dispatch failure."""
 
 
+# DSL-friendly ASSET_SCOPE names → Massive API ``ticker_type`` codes.
+# Keeps the DSL readable ("STOCKS") while passing the API its expected
+# enum value ("CS").
+_ASSET_SCOPE_ALIASES: dict[str, str] = {
+    "STOCKS": "CS",
+    "CS": "CS",
+    "ETF": "ETF",
+}
+
+
 # ── Phase 1: subsetting (SAME_SIC, PICK_TICKERS) ─────────────────────
 
 
@@ -425,7 +435,15 @@ def master_decorator_builder(
                 if len(c) != 2:
                     msg = "ASSET_SCOPE requires 1 argument: <ticker_type>"
                     raise ProcessingLevelError(msg)
-                sources.append(AssetScopeDecorator(c[1]))
+                alias = c[1]
+                ticker_type = _ASSET_SCOPE_ALIASES.get(alias)
+                if ticker_type is None:
+                    msg = (
+                        f"Unknown ASSET_SCOPE {alias!r}. "
+                        f"Known: {sorted(_ASSET_SCOPE_ALIASES)}."
+                    )
+                    raise ProcessingLevelError(msg)
+                sources.append(AssetScopeDecorator(ticker_type))
             case _:
                 pass
 

@@ -269,7 +269,12 @@ def get_ticker_details_df(
             else:
                 row[label] = None
         rows.append(row)
-    return pl.DataFrame(rows)
+    # Declare the schema explicitly: every cell is str-or-None.  Without
+    # this, polars infers from the first few rows — if those rows are
+    # null for a column it guesses the wrong dtype and chokes when a
+    # later row finally has a string value.
+    schema = {label: pl.Utf8 for _, label in _DETAIL_FIELDS}
+    return pl.DataFrame(rows, schema=schema)
 
 
 def get_ticker_details(
