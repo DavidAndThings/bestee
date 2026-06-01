@@ -835,3 +835,444 @@ class TimeSeriesMetricDecorator(TableDecorator):
             )
             .sub_missing(missing_text="—")
         )
+
+
+# ── Stochastic oscillator ────────────────────────────────────────────
+
+
+def stochastic_oscillator(
+    highs: Sequence[float],
+    lows: Sequence[float],
+    closes: Sequence[float],
+    k_period: int,
+    d_period: int,
+) -> tuple[list[float | None], list[float | None]]:
+    """Compute the classic stochastic-oscillator %K and %D series.
+
+    For each bar ``i`` (0-indexed) over the input series:
+
+    * ``%K_i = 100 * (close_i - min(low[i-k+1 .. i])) /
+              (max(high[i-k+1 .. i]) - min(low[i-k+1 .. i]))``
+
+      First ``k_period - 1`` bars have ``None`` (window not yet full).
+      Returns ``None`` when the window's range collapses to zero (no
+      movement → oscillator undefined).
+
+    * ``%D_i = simple moving average of %K over d_period``
+
+      First ``k_period - 1 + d_period - 1`` bars have ``None``;  if any
+      of the last ``d_period`` %K values are ``None`` the average is
+      also ``None``.
+
+    Args:
+        highs: bar-high series.
+        lows: bar-low series.
+        closes: bar-close series.
+        k_period: lookback window for %K.  Typical value: 14.
+        d_period: SMA window for %D.  Typical value: 3.
+
+    Returns:
+        ``(%K series, %D series)`` — both lists of length
+        ``min(len(highs), len(lows), len(closes))``.
+    """
+    if k_period < 1 or d_period < 1:
+        msg = (
+            f"stochastic_oscillator periods must be >= 1; "
+            f"got k_period={k_period}, d_period={d_period}"
+        )
+        raise ValueError(msg)
+
+    n = min(len(highs), len(lows), len(closes))
+    if n == 0:
+        return [], []
+
+    highs_arr = np.asarray(highs[:n], dtype=np.float64)
+    lows_arr = np.asarray(lows[:n], dtype=np.float64)
+    closes_arr = np.asarray(closes[:n], dtype=np.float64)
+
+    k_values: list[float | None] = []
+    for i in range(n):
+        if i < k_period - 1:
+            k_values.append(None)
+            continue
+        window_low = float(lows_arr[i - k_period + 1 : i + 1].min())
+        window_high = float(highs_arr[i - k_period + 1 : i + 1].max())
+        denom = window_high - window_low
+        if denom == 0.0:
+            k_values.append(None)
+            continue
+        k_values.append(100.0 * (float(closes_arr[i]) - window_low) / denom)
+
+    d_values: list[float | None] = []
+    warmup = k_period - 1 + d_period - 1
+    for i in range(n):
+        if i < warmup:
+            d_values.append(None)
+            continue
+        window = k_values[i - d_period + 1 : i + 1]
+        if any(v is None for v in window):
+            d_values.append(None)
+            continue
+        # Cast for ty — we just verified none are None.
+        d_values.append(sum(v for v in window if v is not None) / d_period)
+
+    return k_values, d_values
+
+
+class StochasticOscillatorDecorator(TableDecorator):
+    """Add latest %K and %D stochastic-oscillator values per ticker.
+
+    DSL form::
+
+        STOCHASTIC_OSCILLATOR <name> <ts_high> <ts_low> <ts_close> \\
+                              <k_period> <d_period>
+
+    Output columns: ``<name>_k`` and ``<name>_d`` (Float64), holding
+    each ticker's *latest* %K and %D respectively.  ``None`` flows
+    through cleanly when the series is too short, when the bar's
+    window has zero range, or when any of the three OHLC series is
+    empty.
+
+    Periods are parametrizable:  the classic chart-trader defaults
+    are ``k_period=14``, ``d_period=3``, but anything ``>=1`` works.
+
+    Three :class:`TimeSeriesDef`'s must be supplied (high / low /
+    close) — the decorator pulls each from the chain via
+    :meth:`get_time_series`, so the natural upstream is a stack of
+    three :class:`TimeSeriesCacheDecorator`'s declared via
+    ``TIME_SERIES`` lines.
+    """
+
+    def __init__(
+        self,
+        name: str,
+        ts_high_def: TimeSeriesDef,
+        ts_low_def: TimeSeriesDef,
+        ts_close_def: TimeSeriesDef,
+        k_period: int,
+        d_period: int,
+        *upstream: TableDecorator,
+    ):
+        super().__init__(upstream)
+        if k_period < 1 or d_period < 1:
+            msg = (
+                f"STOCHASTIC_OSCILLATOR periods must be >= 1; "
+                f"got k_period={k_period}, d_period={d_period}"
+            )
+            raise ValueError(msg)
+        self._name = name
+        self._ts_high_def = ts_high_def
+        self._ts_low_def = ts_low_def
+        self._ts_close_def = ts_close_def
+        self._k_period = k_period
+        self._d_period = d_period
+
+    def _build_df(self) -> pl.DataFrame:
+        upstream_df = self._build_from_upstream_or_error()
+        tickers: list[str] = upstream_df[cols.TICKER].to_list()
+        k_values: list[float | None] = []
+        d_values: list[float | None] = []
+        for ticker in tickers:
+            try:
+                highs = self.get_time_series(ticker, self._ts_high_def)
+                lows = self.get_time_series(ticker, self._ts_low_def)
+                closes = self.get_time_series(ticker, self._ts_close_def)
+            except TimeSeriesNotAvailableError:
+                # Defensive — the DSL should already have wired a
+                # producer for every ts_def we hold, so reaching here
+                # means a manually-built chain is missing one.
+                k_values.append(None)
+                d_values.append(None)
+                continue
+            k_series, d_series = stochastic_oscillator(
+                highs, lows, closes, self._k_period, self._d_period
+            )
+            k_values.append(k_series[-1] if k_series else None)
+            d_values.append(d_series[-1] if d_series else None)
+        logger.info(
+            "Computed stochastic %r (k=%d, d=%d) for %d tickers",
+            self._name,
+            self._k_period,
+            self._d_period,
+            len(tickers),
+        )
+        return upstream_df.with_columns(
+            pl.Series(name=f"{self._name}_k", values=k_values, dtype=pl.Float64),
+            pl.Series(name=f"{self._name}_d", values=d_values, dtype=pl.Float64),
+        )
+
+    def build(self) -> GT:
+        df = self._build_df()
+        return (
+            GT(df)
+            .tab_header(
+                title=(
+                    f"With Stochastic Oscillator: {self._name} "
+                    f"(k={self._k_period}, d={self._d_period})"
+                ),
+                subtitle=f"{df.height} tickers",
+            )
+            .sub_missing(missing_text="—")
+        )
+
+
+# ── Relative Strength Index (Wilder's smoothing) ─────────────────────
+
+
+def relative_strength_index(
+    closes: Sequence[float],
+    period: int,
+) -> list[float | None]:
+    """Compute Wilder's Relative Strength Index series.
+
+    For each bar ``i``::
+
+        delta_i  = close_i - close_{i-1}
+        gain_i   = max(delta_i, 0)
+        loss_i   = max(-delta_i, 0)
+
+    Initial averages seed from the first ``period`` gains/losses
+    (simple mean).  Subsequent bars use **Wilder's smoothing**::
+
+        avg_gain_i = (avg_gain_{i-1} * (period - 1) + gain_i) / period
+        avg_loss_i = (avg_loss_{i-1} * (period - 1) + loss_i) / period
+
+    Then::
+
+        RS_i  = avg_gain_i / avg_loss_i
+        RSI_i = 100 - 100 / (1 + RS_i)
+
+    Special cases:
+
+    * ``avg_gain == 0`` *and* ``avg_loss == 0`` (constant prices over
+      the window) — RSI is undefined, return ``None``.
+    * ``avg_loss == 0`` and ``avg_gain > 0`` — RSI = 100 (only gains).
+    * The first ``period`` bars don't have a valid value (warmup) and
+      return ``None``.
+
+    Args:
+        closes: bar-close series, in chronological order.
+        period: lookback window for the moving averages.  Classic
+            chart-trader default is 14.
+
+    Returns:
+        A list of length ``len(closes)`` with ``None`` for warmup /
+        undefined entries.
+
+    Raises:
+        ValueError: If ``period < 1``.
+    """
+    if period < 1:
+        msg = f"RSI period must be >= 1; got {period}"
+        raise ValueError(msg)
+
+    n = len(closes)
+    if n < period + 1:
+        return [None] * n
+
+    arr = np.asarray(closes, dtype=np.float64)
+    deltas = np.diff(arr)  # length n - 1
+    gains = np.where(deltas > 0, deltas, 0.0)
+    losses = np.where(deltas < 0, -deltas, 0.0)
+
+    def _rsi_from(g: float, ll: float) -> float | None:
+        if g == 0.0 and ll == 0.0:
+            return None
+        if ll == 0.0:
+            return 100.0
+        rs = g / ll
+        return 100.0 - 100.0 / (1.0 + rs)
+
+    # SMA seed over the first `period` deltas; the resulting RSI lands
+    # at bar `period` (since deltas[0..period-1] cover closes[0..period]).
+    avg_gain = float(gains[:period].mean())
+    avg_loss = float(losses[:period].mean())
+
+    rsi: list[float | None] = [None] * n
+    rsi[period] = _rsi_from(avg_gain, avg_loss)
+
+    for i in range(period + 1, n):
+        gain = float(gains[i - 1])
+        loss = float(losses[i - 1])
+        avg_gain = (avg_gain * (period - 1) + gain) / period
+        avg_loss = (avg_loss * (period - 1) + loss) / period
+        rsi[i] = _rsi_from(avg_gain, avg_loss)
+
+    return rsi
+
+
+class RelativeStrengthIndexDecorator(TableDecorator):
+    """Add a latest-RSI column per ticker.
+
+    DSL form::
+
+        RSI <name> <ts_close> <period>
+
+    Output column: ``<name>`` (Float64), holding each ticker's *latest*
+    Wilder-smoothed RSI.  ``None`` flows through cleanly when the close
+    series is too short, when the window has no movement (flat prices),
+    or when the cache can't serve the referenced ``ts_close``.
+
+    *period* is parametrizable: the classic chart-trader default is
+    14, but anything ``>= 1`` works.
+    """
+
+    def __init__(
+        self,
+        name: str,
+        ts_close_def: TimeSeriesDef,
+        period: int,
+        *upstream: TableDecorator,
+    ):
+        super().__init__(upstream)
+        if period < 1:
+            msg = f"RSI period must be >= 1; got {period}"
+            raise ValueError(msg)
+        self._name = name
+        self._ts_close_def = ts_close_def
+        self._period = period
+
+    def _build_df(self) -> pl.DataFrame:
+        upstream_df = self._build_from_upstream_or_error()
+        tickers: list[str] = upstream_df[cols.TICKER].to_list()
+        values: list[float | None] = []
+        for ticker in tickers:
+            try:
+                closes = self.get_time_series(ticker, self._ts_close_def)
+            except TimeSeriesNotAvailableError:
+                values.append(None)
+                continue
+            rsi_series = relative_strength_index(closes, self._period)
+            values.append(rsi_series[-1] if rsi_series else None)
+        logger.info(
+            "Computed RSI %r (period=%d) for %d tickers",
+            self._name,
+            self._period,
+            len(tickers),
+        )
+        return upstream_df.with_columns(
+            pl.Series(name=self._name, values=values, dtype=pl.Float64)
+        )
+
+    def build(self) -> GT:
+        df = self._build_df()
+        return (
+            GT(df)
+            .tab_header(
+                title=f"With RSI: {self._name} (period={self._period})",
+                subtitle=f"{df.height} tickers",
+            )
+            .sub_missing(missing_text="—")
+        )
+
+
+# ── Simple Moving Average ────────────────────────────────────────────
+
+
+def simple_moving_average(
+    values: Sequence[float],
+    period: int,
+) -> list[float | None]:
+    """Compute the simple moving average series.
+
+    For each bar ``i``::
+
+        sma_i = mean(values[i - period + 1 .. i])
+
+    The first ``period - 1`` bars don't have a full window and return
+    ``None``.
+
+    Args:
+        values: input series, in chronological order.  Typically bar
+            closes, but any numeric series works.
+        period: window length.  Common choices are 20 (one trading
+            month), 50, 100, 200.
+
+    Returns:
+        A list of length ``len(values)`` with ``None`` for warmup
+        entries.
+
+    Raises:
+        ValueError: If ``period < 1``.
+    """
+    if period < 1:
+        msg = f"SMA period must be >= 1; got {period}"
+        raise ValueError(msg)
+
+    n = len(values)
+    if n == 0:
+        return []
+
+    arr = np.asarray(values, dtype=np.float64)
+    sma: list[float | None] = [None] * n
+    # Cumulative-sum trick: window sum at i is cumsum[i+1] - cumsum[i+1-period].
+    cumsum = np.concatenate(([0.0], np.cumsum(arr)))
+    for i in range(period - 1, n):
+        window_sum = float(cumsum[i + 1] - cumsum[i + 1 - period])
+        sma[i] = window_sum / period
+    return sma
+
+
+class SimpleMovingAverageDecorator(TableDecorator):
+    """Add a latest-SMA column per ticker.
+
+    DSL form::
+
+        SMA <name> <ts_close> <period>
+
+    Output column: ``<name>`` (Float64), holding each ticker's *latest*
+    simple moving average over the trailing ``period`` bars.  ``None``
+    flows through cleanly when the series is shorter than ``period`` or
+    when the cache can't serve the referenced series.
+
+    Any time series can be averaged — close, open, a derived spread —
+    not just closes; the ``ts_close`` name is just convention.
+    """
+
+    def __init__(
+        self,
+        name: str,
+        ts_def: TimeSeriesDef,
+        period: int,
+        *upstream: TableDecorator,
+    ):
+        super().__init__(upstream)
+        if period < 1:
+            msg = f"SMA period must be >= 1; got {period}"
+            raise ValueError(msg)
+        self._name = name
+        self._ts_def = ts_def
+        self._period = period
+
+    def _build_df(self) -> pl.DataFrame:
+        upstream_df = self._build_from_upstream_or_error()
+        tickers: list[str] = upstream_df[cols.TICKER].to_list()
+        values: list[float | None] = []
+        for ticker in tickers:
+            try:
+                series = self.get_time_series(ticker, self._ts_def)
+            except TimeSeriesNotAvailableError:
+                values.append(None)
+                continue
+            sma_series = simple_moving_average(series, self._period)
+            values.append(sma_series[-1] if sma_series else None)
+        logger.info(
+            "Computed SMA %r (period=%d) for %d tickers",
+            self._name,
+            self._period,
+            len(tickers),
+        )
+        return upstream_df.with_columns(
+            pl.Series(name=self._name, values=values, dtype=pl.Float64)
+        )
+
+    def build(self) -> GT:
+        df = self._build_df()
+        return (
+            GT(df)
+            .tab_header(
+                title=f"With SMA: {self._name} (period={self._period})",
+                subtitle=f"{df.height} tickers",
+            )
+            .sub_missing(missing_text="—")
+        )

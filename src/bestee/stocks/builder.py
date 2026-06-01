@@ -19,6 +19,16 @@ earlier ones unambiguously):
   — define a new series as arithmetic over existing ones.
 * ``TIME_SERIES_METRIC <name> <metric> <ts_name>``
   — add a scalar column by applying a registered reducer to a series.
+* ``STOCHASTIC_OSCILLATOR <name> <ts_high> <ts_low> <ts_close>
+  <k_period> <d_period>``
+  — add ``<name>_k`` / ``<name>_d`` columns holding each ticker's
+  latest stochastic-oscillator %K and %D values.
+* ``RSI <name> <ts_close> <period>``
+  — add a ``<name>`` column holding each ticker's latest Wilder's
+  Relative Strength Index value.
+* ``SMA <name> <ts> <period>``
+  — add a ``<name>`` column holding each ticker's latest simple
+  moving average over the trailing ``period`` bars of ``<ts>``.
 
 Pipeline assembly happens as a stack of higher-order
 ``build_<phase>_decorators`` wrappers around :func:`master_decorator_builder`.
@@ -39,7 +49,10 @@ from bestee.stocks.decorators import (
     FinancialMetricCacheDecorator,
     FinancialsDecorator,
     PickTickersDecorator,
+    RelativeStrengthIndexDecorator,
     SameSICategoryDecorator,
+    SimpleMovingAverageDecorator,
+    StochasticOscillatorDecorator,
     TableDecorator,
     TimeSeriesCacheDecorator,
     TimeSeriesDerivedDecorator,
@@ -69,6 +82,7 @@ _ASSET_SCOPE_ALIASES: dict[str, str] = {
     "STOCKS": "CS",
     "CS": "CS",
     "ETF": "ETF",
+    "OTC_STOCKS": "OS",
 }
 
 
@@ -366,19 +380,134 @@ def _process_time_series_metric(
     return [next_stage]
 
 
+def _process_stochastic_oscillator(
+    c: Command,
+    current: Sequence[TableDecorator],
+    ts_defs: dict[str, TimeSeriesDef],
+) -> Sequence[TableDecorator]:
+    """Handle a single ``STOCHASTIC_OSCILLATOR`` command.
+
+    Form: ``STOCHASTIC_OSCILLATOR <name> <ts_high> <ts_low> <ts_close>
+    <k_period> <d_period>``.  Produces two columns ``<name>_k`` and
+    ``<name>_d`` with each ticker's latest %K / %D.
+    """
+    if len(c) != 7:
+        msg = (
+            "STOCHASTIC_OSCILLATOR requires 6 arguments: "
+            "<name> <ts_high> <ts_low> <ts_close> <k_period> <d_period>"
+        )
+        raise ProcessingLevelError(msg)
+    name = c[1]
+    ts_refs = {"<ts_high>": c[2], "<ts_low>": c[3], "<ts_close>": c[4]}
+    resolved: list[TimeSeriesDef] = []
+    for role, ref in ts_refs.items():
+        ts_def = ts_defs.get(ref)
+        if ts_def is None:
+            msg = (
+                f"STOCHASTIC_OSCILLATOR {role} refers to undefined name "
+                f"{ref!r}. Defined: {sorted(ts_defs)}"
+            )
+            raise ProcessingLevelError(msg)
+        resolved.append(ts_def)
+    high_def, low_def, close_def = resolved
+    try:
+        k_period = int(c[5])
+        d_period = int(c[6])
+    except ValueError as err:
+        msg = (
+            "STOCHASTIC_OSCILLATOR k_period and d_period must be "
+            f"integers, got k={c[5]!r} d={c[6]!r}"
+        )
+        raise ProcessingLevelError(msg) from err
+    try:
+        decorator = StochasticOscillatorDecorator(
+            name, high_def, low_def, close_def, k_period, d_period, *current
+        )
+    except ValueError as err:
+        raise ProcessingLevelError(str(err)) from err
+    return [decorator]
+
+
+def _process_rsi(
+    c: Command,
+    current: Sequence[TableDecorator],
+    ts_defs: dict[str, TimeSeriesDef],
+) -> Sequence[TableDecorator]:
+    """Handle a single ``RSI`` command.
+
+    Form: ``RSI <name> <ts_close> <period>``.  Produces one Float64
+    column ``<name>`` holding each ticker's latest Wilder-smoothed RSI.
+    """
+    if len(c) != 4:
+        msg = "RSI requires 3 arguments: <name> <ts_close> <period>"
+        raise ProcessingLevelError(msg)
+    name, ts_close_ref, period_token = c[1], c[2], c[3]
+    ts_close_def = ts_defs.get(ts_close_ref)
+    if ts_close_def is None:
+        msg = (
+            f"RSI <ts_close> refers to undefined name {ts_close_ref!r}. "
+            f"Defined: {sorted(ts_defs)}"
+        )
+        raise ProcessingLevelError(msg)
+    try:
+        period = int(period_token)
+    except ValueError as err:
+        msg = f"RSI period must be an integer, got {period_token!r}"
+        raise ProcessingLevelError(msg) from err
+    try:
+        decorator = RelativeStrengthIndexDecorator(name, ts_close_def, period, *current)
+    except ValueError as err:
+        raise ProcessingLevelError(str(err)) from err
+    return [decorator]
+
+
+def _process_sma(
+    c: Command,
+    current: Sequence[TableDecorator],
+    ts_defs: dict[str, TimeSeriesDef],
+) -> Sequence[TableDecorator]:
+    """Handle a single ``SMA`` command.
+
+    Form: ``SMA <name> <ts> <period>``.  Produces one Float64 column
+    ``<name>`` holding each ticker's latest simple moving average.
+    """
+    if len(c) != 4:
+        msg = "SMA requires 3 arguments: <name> <ts> <period>"
+        raise ProcessingLevelError(msg)
+    name, ts_ref, period_token = c[1], c[2], c[3]
+    ts_def = ts_defs.get(ts_ref)
+    if ts_def is None:
+        msg = (
+            f"SMA <ts> refers to undefined name {ts_ref!r}. Defined: {sorted(ts_defs)}"
+        )
+        raise ProcessingLevelError(msg)
+    try:
+        period = int(period_token)
+    except ValueError as err:
+        msg = f"SMA period must be an integer, got {period_token!r}"
+        raise ProcessingLevelError(msg) from err
+    try:
+        decorator = SimpleMovingAverageDecorator(name, ts_def, period, *current)
+    except ValueError as err:
+        raise ProcessingLevelError(str(err)) from err
+    return [decorator]
+
+
 def build_time_series_decorators(upstream: DecoratorBuilder) -> DecoratorBuilder:
     """Wrap *upstream* with ``TIME_SERIES`` / ``TIME_SERIES_DERIVED`` /
-    ``TIME_SERIES_METRIC`` handling.
+    ``TIME_SERIES_METRIC`` / ``STOCHASTIC_OSCILLATOR`` / ``RSI`` / ``SMA``
+    handling.
 
-    All three commands share a per-pass ``ts_defs`` registry.  Commands
-    run in two sub-passes so DERIVED / METRIC lines can sit anywhere in
-    the input — even before their referenced ``TIME_SERIES``:
+    All commands share a per-pass ``ts_defs`` registry.  Commands run
+    in two sub-passes so DERIVED / METRIC / indicator lines can sit
+    anywhere in the input — even before their referenced
+    ``TIME_SERIES``:
 
     1. All ``TIME_SERIES`` declarations first (in input order).
-    2. Then ``TIME_SERIES_DERIVED`` and ``TIME_SERIES_METRIC`` lines,
-       in input order.  DERIVED-on-DERIVED still requires the source
-       to appear earlier in input order, since the registry grows as
-       we go.
+    2. Then ``TIME_SERIES_DERIVED``, ``TIME_SERIES_METRIC``,
+       ``STOCHASTIC_OSCILLATOR``, ``RSI``, and ``SMA`` lines, in input
+       order.  DERIVED-on-DERIVED still requires the source to appear
+       earlier in input order, since the registry grows as we go.
     """
 
     def decorator_builder(cmds: Sequence[Command]) -> Sequence[TableDecorator]:
@@ -391,14 +520,20 @@ def build_time_series_decorators(upstream: DecoratorBuilder) -> DecoratorBuilder
             if c[0] == CommandHeader.TIME_SERIES:
                 current, ts_defs = _process_time_series(c, current, ts_defs)
 
-        # Pass 2: build derived series and metric columns; both may
-        # reference any name registered above.
+        # Pass 2: build derived series, metric columns, and indicators;
+        # all may reference any name registered above.
         for c in cmds:
             match c[0]:
                 case CommandHeader.TIME_SERIES_DERIVED:
                     current, ts_defs = _process_time_series_derived(c, current, ts_defs)
                 case CommandHeader.TIME_SERIES_METRIC:
                     current = _process_time_series_metric(c, current, ts_defs)
+                case CommandHeader.STOCHASTIC_OSCILLATOR:
+                    current = _process_stochastic_oscillator(c, current, ts_defs)
+                case CommandHeader.RSI:
+                    current = _process_rsi(c, current, ts_defs)
+                case CommandHeader.SMA:
+                    current = _process_sma(c, current, ts_defs)
                 case _:
                     pass
 

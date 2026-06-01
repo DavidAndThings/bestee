@@ -1,0 +1,14 @@
+ASSET_SCOPE STOCKS
+ASSET_SCOPE OTC_STOCKS
+PICK_TICKERS AVAV KRKNF KTOS ONDS SWMR DPRO RCAT AXON SNEX CHYM SOFI PL RKLB
+SAME_SIC_CATEGORY_AS SERV
+FINANCIAL_METRIC latest_revenue REVENUE 2026 1
+FINANCIAL_METRIC revenue_2 REVENUE 2025 4
+FINANCIAL_METRIC revenue_1 REVENUE 2025 3
+FINANCIAL_METRIC latest_market_cap MARKET_CAP 2026 1
+FINANCIAL_METRIC gross_profit GROSS_PROFIT 2026 1
+COMPUTED_METRIC gross_margin (gross_profit / latest_revenue) * 100
+COMPUTED_METRIC latest_revenue_annualized latest_revenue * 4
+COMPUTED_METRIC svr latest_market_cap / latest_revenue_annualized
+COMPUTED_METRIC revenue_growth_2 ((latest_revenue-revenue_2)/revenue_2)*100
+COMPUTED_METRIC revenue_growth_1 ((revenue_2-revenue_1)/revenue_1)*100

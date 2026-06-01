@@ -25,12 +25,18 @@ from bestee.stocks.decorators import (
     FinancialMetricCacheDecorator,
     FinancialsDecorator,
     NoUpstreamError,
+    RelativeStrengthIndexDecorator,
     SameSICategoryDecorator,
+    SimpleMovingAverageDecorator,
+    StochasticOscillatorDecorator,
     TableDecorator,
     TimeSeriesCacheDecorator,
     TimeSeriesDerivedDecorator,
     TimeSeriesMetricDecorator,
     TimeSeriesNotAvailableError,
+    relative_strength_index,
+    simple_moving_average,
+    stochastic_oscillator,
 )
 from bestee.stocks.models import (
     FinancialMetric,
@@ -1260,3 +1266,622 @@ class TestTimeSeriesDerivedDsl:
                     "TIME_SERIES_DERIVED ts3 ts1+",
                 )
             )
+
+
+# ── stochastic_oscillator math ───────────────────────────────────────
+
+
+class TestStochasticOscillatorMath:
+    def test_steady_uptrend_pegs_k_at_100(self) -> None:
+        """A perfectly rising series → latest close == window high → %K = 100."""
+        highs = [10.0, 11.0, 12.0, 13.0, 14.0]
+        lows = [9.0, 10.0, 11.0, 12.0, 13.0]
+        closes = [10.0, 11.0, 12.0, 13.0, 14.0]
+        k, d = stochastic_oscillator(highs, lows, closes, k_period=3, d_period=2)
+        assert len(k) == 5
+        assert k[0] is None and k[1] is None  # warmup
+        assert k[2] == pytest.approx(100.0)
+        assert k[3] == pytest.approx(100.0)
+        assert k[4] == pytest.approx(100.0)
+        # %D = 2-period SMA of %K, with extra 1-bar warmup.
+        assert d[0] is None and d[1] is None and d[2] is None
+        assert d[3] == pytest.approx(100.0)
+        assert d[4] == pytest.approx(100.0)
+
+    def test_steady_downtrend_pegs_k_at_zero(self) -> None:
+        highs = [14.0, 13.0, 12.0, 11.0, 10.0]
+        lows = [13.0, 12.0, 11.0, 10.0, 9.0]
+        closes = [13.0, 12.0, 11.0, 10.0, 9.0]
+        k, d = stochastic_oscillator(highs, lows, closes, k_period=3, d_period=2)
+        assert k[2] == pytest.approx(0.0)
+        assert k[4] == pytest.approx(0.0)
+        assert d[4] == pytest.approx(0.0)
+
+    def test_mid_range_close_yields_50_percent(self) -> None:
+        # Highs/lows define a constant 10-wide window; close sits at mid.
+        highs = [110.0, 110.0, 110.0]
+        lows = [100.0, 100.0, 100.0]
+        closes = [105.0, 105.0, 105.0]
+        k, _ = stochastic_oscillator(highs, lows, closes, k_period=3, d_period=1)
+        assert k[2] == pytest.approx(50.0)
+
+    def test_zero_range_window_returns_none(self) -> None:
+        """All-equal highs and lows → range 0 → %K undefined."""
+        highs = [5.0, 5.0, 5.0]
+        lows = [5.0, 5.0, 5.0]
+        closes = [5.0, 5.0, 5.0]
+        k, _ = stochastic_oscillator(highs, lows, closes, k_period=3, d_period=1)
+        assert k[2] is None
+
+    def test_d_propagates_none_from_k(self) -> None:
+        """If any %K in the d_period window is None, %D is None."""
+        highs = [110.0, 110.0, 110.0, 110.0]
+        lows = [100.0, 100.0, 100.0, 100.0]
+        # Make bar 2 land in a zero-range slice (force None into %K at i=2).
+        # Workaround: use a too-short period so warmup overlaps.
+        closes = [105.0, 105.0, 105.0, 105.0]
+        k, d = stochastic_oscillator(highs, lows, closes, k_period=3, d_period=3)
+        # k[0], k[1] are warmup None; k[2..3] are 50.
+        # d[0..3] need 3 non-None k values; only k[2] and k[3] non-None
+        # so far → d[3] None (window has k[1]=None, k[2]=50, k[3]=50).
+        assert d[3] is None
+        # Extend by one more bar to give d enough non-None inputs.
+        k2, d2 = stochastic_oscillator(
+            highs + [110.0], lows + [100.0], closes + [105.0], k_period=3, d_period=3
+        )
+        assert d2[4] == pytest.approx(50.0)
+
+    def test_empty_input_returns_empty(self) -> None:
+        k, d = stochastic_oscillator([], [], [], k_period=14, d_period=3)
+        assert k == [] and d == []
+
+    def test_mismatched_lengths_truncate_to_shortest(self) -> None:
+        """Three input series of unequal length all get truncated to min()."""
+        highs = [10.0, 11.0, 12.0, 13.0]
+        lows = [9.0, 10.0, 11.0]
+        closes = [10.0, 11.0]
+        k, _ = stochastic_oscillator(highs, lows, closes, k_period=1, d_period=1)
+        assert len(k) == 2  # = min(4, 3, 2)
+
+    @pytest.mark.parametrize("k,d", [(0, 3), (3, 0), (-1, 3)])
+    def test_invalid_periods_raise(self, k: int, d: int) -> None:
+        with pytest.raises(ValueError, match=">= 1"):
+            stochastic_oscillator([1.0], [1.0], [1.0], k_period=k, d_period=d)
+
+
+# ── StochasticOscillatorDecorator integration ───────────────────────
+
+
+def _ts(field: TimeSeriesName, tag: str) -> TimeSeriesDef:
+    """Tagged TimeSeriesDef helper for the stochastic tests."""
+    return TimeSeriesDef(
+        name=field,
+        span=TimeSeriesSpan.DAY,
+        start="2024-01-01",
+        end="2024-04-01",
+        multiplier=1,
+        tag=tag,
+    )
+
+
+class TestStochasticOscillatorDecorator:
+    def test_adds_k_and_d_columns(self) -> None:
+        """Each ticker gets a latest %K and %D, suffixed by name."""
+        ts_high = _ts(TimeSeriesName.HIGH_PRICE, "ts_h")
+        ts_low = _ts(TimeSeriesName.LOW_PRICE, "ts_l")
+        ts_close = _ts(TimeSeriesName.CLOSE_PRICE, "ts_c")
+
+        # Stack the three caches the same way the DSL does: each wraps
+        # the previous one, so the indicator has a single upstream.
+        upstream_df = pl.DataFrame({cols.TICKER: ["AAPL"]})
+        cache_h = TimeSeriesCacheDecorator(ts_high, _StubUpstream(upstream_df))
+        cache_l = TimeSeriesCacheDecorator(ts_low, cache_h)
+        cache_c = TimeSeriesCacheDecorator(ts_close, cache_l)
+        chain = StochasticOscillatorDecorator(
+            "stoch",
+            ts_high,
+            ts_low,
+            ts_close,
+            3,  # k_period
+            2,  # d_period
+            cache_c,
+        )
+
+        # Five-bar rising series → latest %K = 100, latest %D = 100.
+        per_def = {
+            ts_high: [10.0, 11.0, 12.0, 13.0, 14.0],
+            ts_low: [9.0, 10.0, 11.0, 12.0, 13.0],
+            ts_close: [10.0, 11.0, 12.0, 13.0, 14.0],
+        }
+        with patch(_GET_TS_PATCH, side_effect=lambda _t, td: per_def[td]):
+            df = chain._build_df()
+
+        assert {"stoch_k", "stoch_d"} <= set(df.columns)
+        assert df["stoch_k"][0] == pytest.approx(100.0)
+        assert df["stoch_d"][0] == pytest.approx(100.0)
+
+    def test_invalid_periods_raise(self) -> None:
+        ts = _ts(TimeSeriesName.CLOSE_PRICE, "ts")
+        stub = _StubUpstream(pl.DataFrame({cols.TICKER: []}))
+        with pytest.raises(ValueError, match=">= 1"):
+            StochasticOscillatorDecorator("stoch", ts, ts, ts, 0, 3, stub)
+
+    def test_missing_series_yields_none(self) -> None:
+        """If a chain has no producer for one of the ts_defs, the
+        decorator catches TimeSeriesNotAvailableError and emits None."""
+        ts_high = _ts(TimeSeriesName.HIGH_PRICE, "ts_h")
+        ts_low = _ts(TimeSeriesName.LOW_PRICE, "ts_l")
+        ts_close = _ts(TimeSeriesName.CLOSE_PRICE, "ts_c")
+        upstream_df = pl.DataFrame({cols.TICKER: ["AAPL"]})
+        chain = StochasticOscillatorDecorator(
+            "stoch",
+            ts_high,
+            ts_low,
+            ts_close,
+            14,
+            3,
+            _StubUpstream(upstream_df),
+        )
+        df = chain._build_df()
+        assert df["stoch_k"][0] is None
+        assert df["stoch_d"][0] is None
+
+
+# ── STOCHASTIC_OSCILLATOR DSL wiring ────────────────────────────────
+
+
+class TestStochasticOscillatorDsl:
+    def _commands(self, *lines: str) -> list[list[str]]:
+        return [line.split() for line in lines]
+
+    def test_builds_chain_with_three_caches_and_oscillator(self) -> None:
+        pipeline = decorator_builder(
+            self._commands(
+                "ASSET_SCOPE STOCKS",
+                "TIME_SERIES ts_h high_price  2024-01-01 2024-04-01 day 1",
+                "TIME_SERIES ts_l low_price   2024-01-01 2024-04-01 day 1",
+                "TIME_SERIES ts_c close_price 2024-01-01 2024-04-01 day 1",
+                "STOCHASTIC_OSCILLATOR stoch ts_h ts_l ts_c 14 3",
+            )
+        )
+        assert isinstance(pipeline, StochasticOscillatorDecorator)
+        assert pipeline._name == "stoch"
+        assert pipeline._k_period == 14
+        assert pipeline._d_period == 3
+
+    def test_wrong_arity_raises(self) -> None:
+        with pytest.raises(ProcessingLevelError, match="requires 6 arguments"):
+            decorator_builder(
+                self._commands(
+                    "ASSET_SCOPE STOCKS",
+                    "TIME_SERIES ts_h high_price 2024-01-01 2024-04-01 day 1",
+                    "STOCHASTIC_OSCILLATOR stoch ts_h",  # too few
+                )
+            )
+
+    def test_undefined_ts_reference_raises(self) -> None:
+        with pytest.raises(ProcessingLevelError, match="undefined name"):
+            decorator_builder(
+                self._commands(
+                    "ASSET_SCOPE STOCKS",
+                    "TIME_SERIES ts_h high_price 2024-01-01 2024-04-01 day 1",
+                    "STOCHASTIC_OSCILLATOR stoch ts_h tsMissing ts_h 14 3",
+                )
+            )
+
+    def test_non_integer_periods_raise(self) -> None:
+        with pytest.raises(ProcessingLevelError, match="must be integers"):
+            decorator_builder(
+                self._commands(
+                    "ASSET_SCOPE STOCKS",
+                    "TIME_SERIES ts_h high_price  2024-01-01 2024-04-01 day 1",
+                    "TIME_SERIES ts_l low_price   2024-01-01 2024-04-01 day 1",
+                    "TIME_SERIES ts_c close_price 2024-01-01 2024-04-01 day 1",
+                    "STOCHASTIC_OSCILLATOR stoch ts_h ts_l ts_c fourteen 3",
+                )
+            )
+
+    def test_invalid_periods_surface_as_processing_error(self) -> None:
+        with pytest.raises(ProcessingLevelError, match=">= 1"):
+            decorator_builder(
+                self._commands(
+                    "ASSET_SCOPE STOCKS",
+                    "TIME_SERIES ts_h high_price  2024-01-01 2024-04-01 day 1",
+                    "TIME_SERIES ts_l low_price   2024-01-01 2024-04-01 day 1",
+                    "TIME_SERIES ts_c close_price 2024-01-01 2024-04-01 day 1",
+                    "STOCHASTIC_OSCILLATOR stoch ts_h ts_l ts_c 0 3",
+                )
+            )
+
+    def test_oscillator_can_precede_its_ts_declarations(self) -> None:
+        """Pass-2 ordering: STOCHASTIC_OSCILLATOR resolves against any
+        TIME_SERIES declared anywhere in the input."""
+        pipeline = decorator_builder(
+            self._commands(
+                "ASSET_SCOPE STOCKS",
+                # Indicator appears BEFORE its declarations.
+                "STOCHASTIC_OSCILLATOR stoch ts_h ts_l ts_c 14 3",
+                "TIME_SERIES ts_h high_price  2024-01-01 2024-04-01 day 1",
+                "TIME_SERIES ts_l low_price   2024-01-01 2024-04-01 day 1",
+                "TIME_SERIES ts_c close_price 2024-01-01 2024-04-01 day 1",
+            )
+        )
+        assert isinstance(pipeline, StochasticOscillatorDecorator)
+
+
+# ── relative_strength_index math ─────────────────────────────────────
+
+
+class TestRsiMath:
+    def test_steady_uptrend_pegs_rsi_at_100(self) -> None:
+        """All-gains series → avg_loss == 0 → RSI = 100 (from period+1 on)."""
+        closes = [10.0, 11.0, 12.0, 13.0, 14.0, 15.0]
+        rsi = relative_strength_index(closes, period=3)
+        # First `period` entries are warmup → None.
+        assert rsi[0] is None
+        assert rsi[1] is None
+        assert rsi[2] is None
+        assert rsi[3] == pytest.approx(100.0)
+        assert rsi[4] == pytest.approx(100.0)
+        assert rsi[5] == pytest.approx(100.0)
+
+    def test_steady_downtrend_pegs_rsi_at_zero(self) -> None:
+        """All-losses series → avg_gain == 0, avg_loss > 0 → RSI = 0."""
+        closes = [15.0, 14.0, 13.0, 12.0, 11.0, 10.0]
+        rsi = relative_strength_index(closes, period=3)
+        assert rsi[3] == pytest.approx(0.0)
+        assert rsi[5] == pytest.approx(0.0)
+
+    def test_flat_series_returns_none(self) -> None:
+        """Constant prices → zero gain *and* zero loss → undefined RSI."""
+        closes = [5.0, 5.0, 5.0, 5.0, 5.0]
+        rsi = relative_strength_index(closes, period=3)
+        assert all(v is None for v in rsi)
+
+    def test_classic_wilder_example(self) -> None:
+        """Verify against a hand-computed Wilder smoothing example.
+
+        Closes alternate +1 / -1 four times then +1 again (period=4).
+
+        Initial avg_gain = (1+0+1+0)/4 = 0.5
+        Initial avg_loss = (0+1+0+1)/4 = 0.5
+        RS = 1.0, RSI[4] = 50.0
+        Next delta = +1 (gain=1, loss=0):
+          avg_gain = (0.5*3 + 1)/4 = 0.625
+          avg_loss = (0.5*3 + 0)/4 = 0.375
+          RS = 5/3, RSI[5] = 100 - 100/(1 + 5/3) = 62.5
+        """
+        closes = [10.0, 11.0, 10.0, 11.0, 10.0, 11.0]
+        rsi = relative_strength_index(closes, period=4)
+        assert rsi[3] is None  # only `period` entries before [period]
+        assert rsi[4] == pytest.approx(50.0)
+        assert rsi[5] == pytest.approx(62.5)
+
+    def test_short_series_returns_all_none(self) -> None:
+        """Fewer than period+1 closes → no valid RSI anywhere."""
+        rsi = relative_strength_index([1.0, 2.0, 3.0], period=14)
+        assert rsi == [None, None, None]
+
+    def test_empty_input_returns_empty(self) -> None:
+        assert relative_strength_index([], period=14) == []
+
+    def test_rsi_range_is_zero_to_one_hundred(self) -> None:
+        """For arbitrary mixed-direction data, RSI stays in [0, 100]."""
+        closes = [10.0, 12.0, 11.0, 13.0, 12.5, 14.0, 13.5, 15.0]
+        rsi = relative_strength_index(closes, period=3)
+        for v in rsi:
+            if v is None:
+                continue
+            assert 0.0 <= v <= 100.0
+
+    @pytest.mark.parametrize("period", [0, -1])
+    def test_invalid_period_raises(self, period: int) -> None:
+        with pytest.raises(ValueError, match=">= 1"):
+            relative_strength_index([1.0, 2.0], period=period)
+
+
+# ── RelativeStrengthIndexDecorator integration ───────────────────────
+
+
+class TestRsiDecorator:
+    def test_adds_rsi_column(self) -> None:
+        """Each ticker gets a latest-RSI value in a single Float64 column."""
+        ts_close = _ts(TimeSeriesName.CLOSE_PRICE, "ts_c")
+
+        upstream_df = pl.DataFrame({cols.TICKER: ["AAPL"]})
+        cache_c = TimeSeriesCacheDecorator(ts_close, _StubUpstream(upstream_df))
+        chain = RelativeStrengthIndexDecorator("rsi", ts_close, 3, cache_c)
+
+        # All-gains series → RSI = 100.
+        per_def = {ts_close: [10.0, 11.0, 12.0, 13.0, 14.0, 15.0]}
+        with patch(_GET_TS_PATCH, side_effect=lambda _t, td: per_def[td]):
+            df = chain._build_df()
+
+        assert "rsi" in df.columns
+        assert df["rsi"][0] == pytest.approx(100.0)
+
+    def test_invalid_period_raises(self) -> None:
+        ts = _ts(TimeSeriesName.CLOSE_PRICE, "ts")
+        stub = _StubUpstream(pl.DataFrame({cols.TICKER: []}))
+        with pytest.raises(ValueError, match=">= 1"):
+            RelativeStrengthIndexDecorator("rsi", ts, 0, stub)
+
+    def test_missing_series_yields_none(self) -> None:
+        """If the chain has no producer for ts_close, RSI is None."""
+        ts_close = _ts(TimeSeriesName.CLOSE_PRICE, "ts_c")
+        upstream_df = pl.DataFrame({cols.TICKER: ["AAPL"]})
+        chain = RelativeStrengthIndexDecorator(
+            "rsi", ts_close, 14, _StubUpstream(upstream_df)
+        )
+        df = chain._build_df()
+        assert df["rsi"][0] is None
+
+    def test_flat_series_yields_none(self) -> None:
+        """Constant prices through the cache → RSI undefined → None column."""
+        ts_close = _ts(TimeSeriesName.CLOSE_PRICE, "ts_c")
+        upstream_df = pl.DataFrame({cols.TICKER: ["AAPL"]})
+        cache_c = TimeSeriesCacheDecorator(ts_close, _StubUpstream(upstream_df))
+        chain = RelativeStrengthIndexDecorator("rsi", ts_close, 3, cache_c)
+        per_def = {ts_close: [5.0] * 10}
+        with patch(_GET_TS_PATCH, side_effect=lambda _t, td: per_def[td]):
+            df = chain._build_df()
+        assert df["rsi"][0] is None
+
+
+# ── RSI DSL wiring ──────────────────────────────────────────────────
+
+
+class TestRsiDsl:
+    def _commands(self, *lines: str) -> list[list[str]]:
+        return [line.split() for line in lines]
+
+    def test_builds_chain_with_cache_and_rsi(self) -> None:
+        pipeline = decorator_builder(
+            self._commands(
+                "ASSET_SCOPE STOCKS",
+                "TIME_SERIES ts_c close_price 2024-01-01 2024-04-01 day 1",
+                "RSI rsi ts_c 14",
+            )
+        )
+        assert isinstance(pipeline, RelativeStrengthIndexDecorator)
+        assert pipeline._name == "rsi"
+        assert pipeline._period == 14
+
+    def test_wrong_arity_raises(self) -> None:
+        with pytest.raises(ProcessingLevelError, match="requires 3 arguments"):
+            decorator_builder(
+                self._commands(
+                    "ASSET_SCOPE STOCKS",
+                    "TIME_SERIES ts_c close_price 2024-01-01 2024-04-01 day 1",
+                    "RSI rsi ts_c",  # too few
+                )
+            )
+
+    def test_undefined_ts_reference_raises(self) -> None:
+        with pytest.raises(ProcessingLevelError, match="undefined name"):
+            decorator_builder(
+                self._commands(
+                    "ASSET_SCOPE STOCKS",
+                    "TIME_SERIES ts_c close_price 2024-01-01 2024-04-01 day 1",
+                    "RSI rsi tsMissing 14",
+                )
+            )
+
+    def test_non_integer_period_raises(self) -> None:
+        with pytest.raises(ProcessingLevelError, match="must be an integer"):
+            decorator_builder(
+                self._commands(
+                    "ASSET_SCOPE STOCKS",
+                    "TIME_SERIES ts_c close_price 2024-01-01 2024-04-01 day 1",
+                    "RSI rsi ts_c fourteen",
+                )
+            )
+
+    def test_invalid_period_surfaces_as_processing_error(self) -> None:
+        with pytest.raises(ProcessingLevelError, match=">= 1"):
+            decorator_builder(
+                self._commands(
+                    "ASSET_SCOPE STOCKS",
+                    "TIME_SERIES ts_c close_price 2024-01-01 2024-04-01 day 1",
+                    "RSI rsi ts_c 0",
+                )
+            )
+
+    def test_rsi_can_precede_its_ts_declaration(self) -> None:
+        """Pass-2 ordering: RSI resolves against any TIME_SERIES declared
+        anywhere in the input."""
+        pipeline = decorator_builder(
+            self._commands(
+                "ASSET_SCOPE STOCKS",
+                # Indicator appears BEFORE its declaration.
+                "RSI rsi ts_c 14",
+                "TIME_SERIES ts_c close_price 2024-01-01 2024-04-01 day 1",
+            )
+        )
+        assert isinstance(pipeline, RelativeStrengthIndexDecorator)
+
+
+# ── simple_moving_average math ───────────────────────────────────────
+
+
+class TestSmaMath:
+    def test_basic_three_point_window(self) -> None:
+        """SMA over period=3 picks up at index 2 and rolls thereafter."""
+        sma = simple_moving_average([1.0, 2.0, 3.0, 4.0, 5.0], period=3)
+        assert sma[0] is None
+        assert sma[1] is None
+        assert sma[2] == pytest.approx(2.0)  # (1+2+3)/3
+        assert sma[3] == pytest.approx(3.0)  # (2+3+4)/3
+        assert sma[4] == pytest.approx(4.0)  # (3+4+5)/3
+
+    def test_period_one_passes_through(self) -> None:
+        """period=1 → SMA is the value itself, no warmup."""
+        sma = simple_moving_average([2.0, 4.0, 6.0], period=1)
+        assert sma == [pytest.approx(2.0), pytest.approx(4.0), pytest.approx(6.0)]
+
+    def test_flat_series(self) -> None:
+        sma = simple_moving_average([5.0, 5.0, 5.0, 5.0], period=2)
+        assert sma[0] is None
+        for v in sma[1:]:
+            assert v == pytest.approx(5.0)
+
+    def test_short_series_returns_all_none(self) -> None:
+        """Fewer than `period` values → all None."""
+        assert simple_moving_average([1.0, 2.0], period=5) == [None, None]
+
+    def test_empty_input_returns_empty(self) -> None:
+        assert simple_moving_average([], period=14) == []
+
+    def test_window_equals_length(self) -> None:
+        """period == len(values) → exactly one non-None at the end."""
+        sma = simple_moving_average([1.0, 2.0, 3.0, 4.0], period=4)
+        assert sma[:3] == [None, None, None]
+        assert sma[3] == pytest.approx(2.5)
+
+    def test_negative_values_average_correctly(self) -> None:
+        """The cumsum trick must work for negative numbers too."""
+        sma = simple_moving_average([-1.0, -2.0, -3.0, -4.0], period=2)
+        assert sma[0] is None
+        assert sma[1] == pytest.approx(-1.5)
+        assert sma[2] == pytest.approx(-2.5)
+        assert sma[3] == pytest.approx(-3.5)
+
+    @pytest.mark.parametrize("period", [0, -1])
+    def test_invalid_period_raises(self, period: int) -> None:
+        with pytest.raises(ValueError, match=">= 1"):
+            simple_moving_average([1.0, 2.0], period=period)
+
+
+# ── SimpleMovingAverageDecorator integration ─────────────────────────
+
+
+class TestSmaDecorator:
+    def test_adds_sma_column(self) -> None:
+        """Each ticker gets a latest-SMA value in a single Float64 column."""
+        ts_close = _ts(TimeSeriesName.CLOSE_PRICE, "ts_c")
+
+        upstream_df = pl.DataFrame({cols.TICKER: ["AAPL"]})
+        cache_c = TimeSeriesCacheDecorator(ts_close, _StubUpstream(upstream_df))
+        chain = SimpleMovingAverageDecorator("sma3", ts_close, 3, cache_c)
+
+        # Latest 3-bar SMA over [1,2,3,4,5] is (3+4+5)/3 = 4.0.
+        per_def = {ts_close: [1.0, 2.0, 3.0, 4.0, 5.0]}
+        with patch(_GET_TS_PATCH, side_effect=lambda _t, td: per_def[td]):
+            df = chain._build_df()
+
+        assert "sma3" in df.columns
+        assert df["sma3"][0] == pytest.approx(4.0)
+
+    def test_invalid_period_raises(self) -> None:
+        ts = _ts(TimeSeriesName.CLOSE_PRICE, "ts")
+        stub = _StubUpstream(pl.DataFrame({cols.TICKER: []}))
+        with pytest.raises(ValueError, match=">= 1"):
+            SimpleMovingAverageDecorator("sma", ts, 0, stub)
+
+    def test_missing_series_yields_none(self) -> None:
+        """If the chain has no producer for the ts, SMA is None."""
+        ts_close = _ts(TimeSeriesName.CLOSE_PRICE, "ts_c")
+        upstream_df = pl.DataFrame({cols.TICKER: ["AAPL"]})
+        chain = SimpleMovingAverageDecorator(
+            "sma", ts_close, 20, _StubUpstream(upstream_df)
+        )
+        df = chain._build_df()
+        assert df["sma"][0] is None
+
+    def test_short_series_yields_none(self) -> None:
+        """Series shorter than period → last SMA value is None."""
+        ts_close = _ts(TimeSeriesName.CLOSE_PRICE, "ts_c")
+        upstream_df = pl.DataFrame({cols.TICKER: ["AAPL"]})
+        cache_c = TimeSeriesCacheDecorator(ts_close, _StubUpstream(upstream_df))
+        chain = SimpleMovingAverageDecorator("sma", ts_close, 10, cache_c)
+        per_def = {ts_close: [1.0, 2.0, 3.0]}
+        with patch(_GET_TS_PATCH, side_effect=lambda _t, td: per_def[td]):
+            df = chain._build_df()
+        assert df["sma"][0] is None
+
+
+# ── SMA DSL wiring ───────────────────────────────────────────────────
+
+
+class TestSmaDsl:
+    def _commands(self, *lines: str) -> list[list[str]]:
+        return [line.split() for line in lines]
+
+    def test_builds_chain_with_cache_and_sma(self) -> None:
+        pipeline = decorator_builder(
+            self._commands(
+                "ASSET_SCOPE STOCKS",
+                "TIME_SERIES ts_c close_price 2024-01-01 2024-04-01 day 1",
+                "SMA sma20 ts_c 20",
+            )
+        )
+        assert isinstance(pipeline, SimpleMovingAverageDecorator)
+        assert pipeline._name == "sma20"
+        assert pipeline._period == 20
+
+    def test_wrong_arity_raises(self) -> None:
+        with pytest.raises(ProcessingLevelError, match="requires 3 arguments"):
+            decorator_builder(
+                self._commands(
+                    "ASSET_SCOPE STOCKS",
+                    "TIME_SERIES ts_c close_price 2024-01-01 2024-04-01 day 1",
+                    "SMA sma ts_c",  # too few
+                )
+            )
+
+    def test_undefined_ts_reference_raises(self) -> None:
+        with pytest.raises(ProcessingLevelError, match="undefined name"):
+            decorator_builder(
+                self._commands(
+                    "ASSET_SCOPE STOCKS",
+                    "TIME_SERIES ts_c close_price 2024-01-01 2024-04-01 day 1",
+                    "SMA sma tsMissing 20",
+                )
+            )
+
+    def test_non_integer_period_raises(self) -> None:
+        with pytest.raises(ProcessingLevelError, match="must be an integer"):
+            decorator_builder(
+                self._commands(
+                    "ASSET_SCOPE STOCKS",
+                    "TIME_SERIES ts_c close_price 2024-01-01 2024-04-01 day 1",
+                    "SMA sma ts_c twenty",
+                )
+            )
+
+    def test_invalid_period_surfaces_as_processing_error(self) -> None:
+        with pytest.raises(ProcessingLevelError, match=">= 1"):
+            decorator_builder(
+                self._commands(
+                    "ASSET_SCOPE STOCKS",
+                    "TIME_SERIES ts_c close_price 2024-01-01 2024-04-01 day 1",
+                    "SMA sma ts_c 0",
+                )
+            )
+
+    def test_sma_can_precede_its_ts_declaration(self) -> None:
+        """Pass-2 ordering: SMA resolves against any TIME_SERIES declared
+        anywhere in the input."""
+        pipeline = decorator_builder(
+            self._commands(
+                "ASSET_SCOPE STOCKS",
+                # Indicator appears BEFORE its declaration.
+                "SMA sma ts_c 20",
+                "TIME_SERIES ts_c close_price 2024-01-01 2024-04-01 day 1",
+            )
+        )
+        assert isinstance(pipeline, SimpleMovingAverageDecorator)
+
+    def test_sma_works_on_derived_series(self) -> None:
+        """SMA can target a derived series (any TimeSeriesDef in the registry)."""
+        pipeline = decorator_builder(
+            self._commands(
+                "ASSET_SCOPE STOCKS",
+                "TIME_SERIES ts_o open_price  2024-01-01 2024-04-01 day 1",
+                "TIME_SERIES ts_c close_price 2024-01-01 2024-04-01 day 1",
+                "TIME_SERIES_DERIVED spread ts_c-ts_o",
+                "SMA sma_spread spread 10",
+            )
+        )
+        assert isinstance(pipeline, SimpleMovingAverageDecorator)
+        assert pipeline._name == "sma_spread"
