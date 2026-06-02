@@ -1,3 +1,26 @@
+"""KnowledgeBase-building decorators for the DSL pipeline.
+
+Each stage in the pipeline implements :meth:`KnowledgeBaseDecorator._build_kb`,
+which receives the upstream :class:`KnowledgeBase` (or builds an initial
+one in the case of source stages) and **mutates it in place** before
+returning it.  Downstream stages then layer their own additions on top.
+
+The shared payload is per-ticker.  :class:`Stock` carries categorical
+identity fields (name, SIC code, exchange, …), a ``numeric_metrics``
+dict for scalar values (revenue, latest RSI, …), and a
+``numeric_time_series`` dict for full OHLC / indicator series.  Every
+key in those dicts is the DSL alias the user wrote — e.g. an
+``RSI rsi14 ts_c 14`` line populates ``stock.numeric_time_series["rsi14"]``
+with the full RSI series and registers
+``alias_map["rsi14"] = ts_def_for_rsi14`` on the shared
+:class:`KnowledgeBase`.
+
+Stages are stitched into a chain by :mod:`bestee.stocks.builder`; the
+caller invokes :meth:`KnowledgeBaseDecorator.build` to get a
+:class:`great_tables.GT` view, or :meth:`_build_kb` to inspect the raw
+structure programmatically.
+"""
+
 from __future__ import annotations
 
 import ast
@@ -5,6 +28,7 @@ import logging
 import operator
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Mapping, Sequence
+from dataclasses import fields as dataclass_fields
 from typing import Any
 
 import numpy as np
@@ -14,7 +38,12 @@ from great_tables import GT
 from bestee.stocks import columns as cols
 from bestee.stocks.financials import build_financials_df
 from bestee.stocks.market import get_time_series
-from bestee.stocks.models import FinancialMetric, TimeSeriesDef
+from bestee.stocks.models import (
+    FinancialMetric,
+    KnowledgeBase,
+    Stock,
+    TimeSeriesDef,
+)
 from bestee.stocks.tickers import get_all_tickers_df, get_ticker_details_df
 
 logger = logging.getLogger(__name__)
@@ -26,199 +55,237 @@ class NoUpstreamError(Exception):
     pass
 
 
-class TimeSeriesNotAvailableError(Exception):
-    pass
+# ── Base class ───────────────────────────────────────────────────────
 
 
-class TableDecorator(ABC):
-    """Base class for pipeline stages that produce a tabular result.
+class KnowledgeBaseDecorator(ABC):
+    """Pipeline stage that mutates and forwards a :class:`KnowledgeBase`."""
 
-    Stages chain internally as DataFrame → DataFrame via :meth:`_build_df`
-    so the pipeline avoids round-tripping through Great Tables between
-    every step.  Each stage's :meth:`build` wraps the final DataFrame in
-    a styled :class:`GT` for end-user display.
-    """
-
-    def __init__(self, upstream_decorators: Sequence[TableDecorator] | None = None):
+    def __init__(
+        self,
+        upstream_decorators: Sequence[KnowledgeBaseDecorator] | None = None,
+    ):
         self._upstream = upstream_decorators
 
-    def _build_from_upstream(self) -> pl.DataFrame:
-        """Return the combined upstream DataFrame.
+    def _build_from_upstream(self) -> KnowledgeBase:
+        """Return the combined upstream :class:`KnowledgeBase`.
 
-        Default supports the common single-upstream case by delegating
-        to that upstream's :meth:`_build_df`.  Subclasses with multiple
-        upstreams (fan-in) override this to combine them.
-
-        Callers should prefer :meth:`_build_from_upstream_or_error`,
-        which checks for an empty / missing upstream chain first; this
-        method assumes ``self._upstream`` is a non-empty sequence.
+        Single-upstream case delegates to that upstream's :meth:`_build_kb`.
+        Subclasses with fan-in (multiple upstreams) override this.
         """
         assert self._upstream is not None
         if len(self._upstream) == 1:
-            return self._upstream[0]._build_df()
+            return self._upstream[0]._build_kb()
         msg = (
             f"{type(self).__name__} has {len(self._upstream)} upstreams; "
             "override _build_from_upstream to combine them."
         )
         raise NotImplementedError(msg)
 
-    def _build_from_upstream_or_error(self) -> pl.DataFrame:
-        """Return the combined upstream DataFrame, or raise if none."""
+    def _build_from_upstream_or_error(self) -> KnowledgeBase:
         if self._upstream is None:
             raise NoUpstreamError("No upstream decorator")
         return self._build_from_upstream()
 
     @abstractmethod
-    def _build_df(self) -> pl.DataFrame:
-        """Return this stage's output as a Polars DataFrame (no styling)."""
-
-    @abstractmethod
-    def build(self) -> GT:
-        """Return this stage's output as a styled Great Tables object."""
-
-    def get_time_series_from_upstream(
-        self, ticker: str, ts_def: TimeSeriesDef
-    ) -> Sequence[float]:
-        """Walk the upstream(s) looking for one that can serve *ts_def*.
-
-        Each upstream gets a try; ones that raise
-        :class:`TimeSeriesNotAvailableError` are skipped.  If none
-        serve it, propagates the same exception.
-        """
-        for decorator in self._upstream or []:
-            try:
-                return decorator.get_time_series(ticker, ts_def)
-            except TimeSeriesNotAvailableError:
-                continue
-        raise TimeSeriesNotAvailableError
-
-    def get_time_series(self, ticker: str, ts_def: TimeSeriesDef) -> Sequence[float]:
-        """Return the time series for *ticker*.
-
-        Default delegates to upstream via
-        :meth:`get_time_series_from_upstream`.  Stages that actually
-        produce series (e.g. :class:`TimeSeriesCacheDecorator`,
-        :class:`TimeSeriesDerivedDecorator`) override this.
-        """
-        return self.get_time_series_from_upstream(ticker, ts_def)
-
-
-class AssetScopeDecorator(TableDecorator):
-    def __init__(
-        self,
-        ticker_type: str,
-    ):
-        super().__init__(None)
-        self.ticker_type = ticker_type
-
-    def _build_df(self) -> pl.DataFrame:
-        symbols_df = get_all_tickers_df(ticker_type=self.ticker_type, active=True)
-        symbols: list[str] = symbols_df[cols.TICKER].to_list()
-        return get_ticker_details_df(symbols)
+    def _build_kb(self) -> KnowledgeBase:
+        """Return this stage's output KnowledgeBase."""
 
     def build(self) -> GT:
-        df = self._build_df()
+        """Render the final KnowledgeBase as a Great Tables view.
+
+        Default rendering: one row per ticker, columns for every populated
+        categorical field, every entry in ``numeric_metrics``, and the
+        *latest* value of every entry in ``numeric_time_series``.
+        Subclasses may override to customise titles / styling.
+        """
+        kb = self._build_kb()
+        df = _kb_to_df(kb)
         return (
             GT(df)
             .tab_header(
-                title="Ticker Details",
-                subtitle=f"{df.height} tickers from the Massive API",
+                title=f"{type(self).__name__}",
+                subtitle=f"{df.height} ticker(s)",
             )
             .sub_missing(missing_text="—")
         )
 
 
-class SameSICategoryDecorator(TableDecorator):
-    def __init__(self, ticker: str, *upstream: TableDecorator):
+# ── Source stage ─────────────────────────────────────────────────────
+
+
+# DataFrame column → Stock attribute name.  Mirrors tickers._DETAIL_FIELDS
+# but goes the other direction (the details DataFrame uses cols.* labels;
+# we turn each row into a Stock).
+_STOCK_CATEGORICAL_FIELDS: dict[str, str] = {
+    cols.NAME: "name",
+    cols.DESCRIPTION: "description",
+    cols.TYPE: "type",
+    cols.MARKET: "market",
+    cols.LOCALE: "locale",
+    cols.PRIMARY_EXCHANGE: "primary_exchange",
+    cols.CURRENCY: "currency_name",
+    cols.CIK: "cik",
+    cols.COMPOSITE_FIGI: "composite_figi",
+    cols.SHARE_CLASS_FIGI: "share_class_figi",
+    cols.SIC_CODE: "sic_code",
+    cols.SIC_DESCRIPTION: "sic_description",
+    cols.MARKET_CAP: "market_cap",
+    cols.SHARES_OUTSTANDING: "share_class_shares_outstanding",
+    cols.WEIGHTED_SHARES_OUTSTANDING: "weighted_shares_outstanding",
+    cols.TOTAL_EMPLOYEES: "total_employees",
+    cols.LIST_DATE: "list_date",
+    cols.HOMEPAGE_URL: "homepage_url",
+    cols.PHONE_NUMBER: "phone_number",
+    cols.TICKER_ROOT: "ticker_root",
+}
+
+
+def _stock_from_row(row: Mapping[str, Any]) -> Stock | None:
+    """Build a :class:`Stock` from one ticker-details DataFrame row."""
+    ticker = row.get(cols.TICKER)
+    if ticker is None:
+        return None
+    kwargs: dict[str, Any] = {"ticker": ticker}
+    for col_name, attr in _STOCK_CATEGORICAL_FIELDS.items():
+        kwargs[attr] = row.get(col_name)
+    return Stock(**kwargs)
+
+
+class AssetScopeDecorator(KnowledgeBaseDecorator):
+    """Seed the KnowledgeBase with one :class:`Stock` per ticker in scope.
+
+    Fetches the active ticker list for the given ``ticker_type`` plus the
+    full ticker-details payload, then materialises a :class:`Stock` for
+    every symbol with its categorical fields populated.  Numeric payloads
+    start empty — later stages fill them.
+    """
+
+    def __init__(self, ticker_type: str):
+        super().__init__(None)
+        self.ticker_type = ticker_type
+
+    def _build_kb(self) -> KnowledgeBase:
+        symbols_df = get_all_tickers_df(ticker_type=self.ticker_type, active=True)
+        symbols: list[str] = symbols_df[cols.TICKER].to_list()
+        details_df = get_ticker_details_df(symbols)
+        kb = KnowledgeBase()
+        for row in details_df.iter_rows(named=True):
+            stock = _stock_from_row(row)
+            if stock is None:
+                continue
+            kb.stock_data[stock.ticker] = stock
+        logger.info(
+            "AssetScopeDecorator(%r): seeded KB with %d stock(s)",
+            self.ticker_type,
+            len(kb.stock_data),
+        )
+        return kb
+
+
+# ── Subsetting ───────────────────────────────────────────────────────
+
+
+class SameSICategoryDecorator(KnowledgeBaseDecorator):
+    """Prune ``stock_data`` to tickers sharing the target's SIC code."""
+
+    def __init__(self, ticker: str, *upstream: KnowledgeBaseDecorator):
         super().__init__(upstream)
         self.ticker = ticker
 
-    def _build_df(self) -> pl.DataFrame:
-        df = self._build_from_upstream_or_error()
-
-        # Locate the target ticker's SIC code.
-        target_rows = df.filter(pl.col(cols.TICKER) == self.ticker)
-        if target_rows.height == 0:
-            msg = f"Ticker {self.ticker!r} not found in upstream table"
+    def _build_kb(self) -> KnowledgeBase:
+        kb = self._build_from_upstream_or_error()
+        target = kb.stock_data.get(self.ticker)
+        if target is None:
+            msg = f"Ticker {self.ticker!r} not found in upstream KnowledgeBase"
             raise ValueError(msg)
-        target_sic = target_rows[cols.SIC_CODE].item(0)
-        if target_sic is None:
-            msg = f"Ticker {self.ticker!r} has no SIC code in upstream table"
+        if target.sic_code is None:
+            msg = f"Ticker {self.ticker!r} has no SIC code"
             raise ValueError(msg)
-
-        # Filter the upstream to rows sharing the same SIC code.
-        return df.filter(pl.col(cols.SIC_CODE) == target_sic)
-
-    def build(self) -> GT:
-        filtered = self._build_df()
-        target_sic = filtered.filter(pl.col(cols.TICKER) == self.ticker)[
-            cols.SIC_CODE
-        ].item(0)
-        return (
-            GT(filtered)
-            .tab_header(
-                title="Tickers in Same SIC Category",
-                subtitle=(
-                    f"SIC {target_sic} · same category as {self.ticker} · "
-                    f"{filtered.height} tickers"
-                ),
-            )
-            .sub_missing(missing_text="—")
+        target_sic = target.sic_code
+        kb.stock_data = {
+            t: s for t, s in kb.stock_data.items() if s.sic_code == target_sic
+        }
+        logger.info(
+            "SameSICategoryDecorator(%r): %d stock(s) share SIC %s",
+            self.ticker,
+            len(kb.stock_data),
+            target_sic,
         )
+        return kb
 
 
-class PickTickersDecorator(TableDecorator):
-    """Config-only marker that registers a ticker list for a downstream
-    :class:`FinancialsDecorator` to fetch metrics for."""
+class PickTickersDecorator(KnowledgeBaseDecorator):
+    """Prune ``stock_data`` to a fixed list of tickers."""
 
-    def __init__(self, tickers: Sequence[str], *upstream: TableDecorator):
+    def __init__(self, tickers: Sequence[str], *upstream: KnowledgeBaseDecorator):
         super().__init__(upstream)
-        self.tickers = tickers
+        self.tickers = list(tickers)
 
-    def _build_df(self) -> pl.DataFrame:
-        df = self._build_from_upstream_or_error()
-        return df.filter(pl.col(cols.TICKER).is_in(self.tickers))
-
-    def build(self) -> GT:
-        return GT(self._build_df())
-
-
-class AppendTablesDecorator(TableDecorator):
-    """Append multiple upstream tables vertically into one DataFrame."""
-
-    def __init__(self, *upstream: TableDecorator):
-        super().__init__(upstream)
-
-    def _build_df(self) -> pl.DataFrame:
-        assert self._upstream is not None, (
-            "AppendTablesDecorator requires upstream decorators"
+    def _build_kb(self) -> KnowledgeBase:
+        kb = self._build_from_upstream_or_error()
+        wanted = set(self.tickers)
+        kb.stock_data = {t: s for t, s in kb.stock_data.items() if t in wanted}
+        logger.info(
+            "PickTickersDecorator(%d wanted): %d kept",
+            len(wanted),
+            len(kb.stock_data),
         )
-        dfs = [upstream._build_df() for upstream in self._upstream]
-        return pl.concat(dfs)
-
-    def build(self) -> GT:
-        return GT(self._build_df())
+        return kb
 
 
-class FinancialMetricCacheDecorator(TableDecorator):
-    """Config-only marker that registers one ``(name, FinancialMetric)``
-    pair for a downstream :class:`FinancialsDecorator` to batch-fetch.
+# ── Fan-in ───────────────────────────────────────────────────────────
 
-    It's a :class:`TableDecorator` subclass purely so it can be passed
-    alongside the table-providing upstream in
-    ``FinancialsDecorator(*upstream)``; it doesn't itself build a
-    DataFrame.  Calling :meth:`_build_df` or :meth:`build` on it
-    directly is a programmer error.
+
+class AppendTablesDecorator(KnowledgeBaseDecorator):
+    """Merge multiple upstream KnowledgeBases into one.
+
+    Used both to union multiple ``ASSET_SCOPE`` sources and to union
+    parallel subsetting filters.  Stocks colliding by ticker keep the
+    first-seen entry — at the source/subset stages there are no metrics
+    yet, so collisions are effectively no-ops.
+    """
+
+    def __init__(self, *upstream: KnowledgeBaseDecorator):
+        super().__init__(upstream)
+
+    def _build_from_upstream(self) -> KnowledgeBase:
+        assert self._upstream is not None
+        merged = KnowledgeBase()
+        for up in self._upstream:
+            kb = up._build_kb()
+            for ticker, stock in kb.stock_data.items():
+                merged.stock_data.setdefault(ticker, stock)
+            merged.alias_map.update(kb.alias_map)
+            merged.pairwise_data.update(kb.pairwise_data)
+        return merged
+
+    def _build_kb(self) -> KnowledgeBase:
+        return self._build_from_upstream_or_error()
+
+
+# ── Financial metrics ────────────────────────────────────────────────
+
+
+class FinancialMetricCacheDecorator(KnowledgeBaseDecorator):
+    """Config-only marker registering one ``(alias, FinancialMetric)`` pair.
+
+    Passed alongside the table-providing upstream of a
+    :class:`FinancialsDecorator`, which collects them into a single
+    batched API call.
     """
 
     def __init__(
-        self, metric_name: str, metric: FinancialMetric, *upstream: TableDecorator
+        self,
+        metric_name: str,
+        metric: FinancialMetric,
+        *upstream: KnowledgeBaseDecorator,
     ):
         super().__init__(upstream)
         self.metric_name = metric_name
         self.metric = metric
 
-    def _build_df(self) -> pl.DataFrame:
+    def _build_kb(self) -> KnowledgeBase:
         msg = (
             "FinancialMetricCacheDecorator is a config-only stage; pass it "
             "as an upstream to a FinancialsDecorator instead of building it "
@@ -226,48 +293,35 @@ class FinancialMetricCacheDecorator(TableDecorator):
         )
         raise NoUpstreamError(msg)
 
-    def build(self) -> GT:
-        return GT(self._build_df())
 
+class FinancialsDecorator(KnowledgeBaseDecorator):
+    """Batch-fetch every registered FinancialMetric and write into stocks.
 
-class FinancialsDecorator(TableDecorator):
-    """Add named financial-metric columns from a single batched API call.
-
-    Constructed with a mix of upstreams: exactly one
-    table-providing decorator (the chain head) plus zero or more
-    :class:`FinancialMetricCacheDecorator` instances that declare which
-    ``(name, FinancialMetric)`` pairs to fetch.  All metrics are
-    fetched in one ``build_financials_df`` round-trip and joined to
-    the upstream table, with each column renamed from the SDK's
-    default ``"<base_label> (FY… Q…)"`` form to the user's name.
+    One upstream is the table-providing chain head (any KB-producing
+    decorator); the rest are :class:`FinancialMetricCacheDecorator`
+    markers that declare ``(alias, FinancialMetric)`` pairs.  All metrics
+    are fetched in one ``build_financials_df`` round-trip and stamped
+    into ``stock.numeric_metrics`` per ticker.
     """
 
-    def __init__(self, *upstream: TableDecorator):
+    def __init__(self, *upstream: KnowledgeBaseDecorator):
         super().__init__(upstream)
 
     @property
     def _named_metrics(self) -> dict[str, FinancialMetric]:
-        assert self._upstream is not None, (
-            "upstream_decorators must be provided for the FinancialsDecorator"
-        )
-        named_metrics: dict[str, FinancialMetric] = {}
-        for decorator in self._upstream:
-            if isinstance(decorator, FinancialMetricCacheDecorator):
-                named_metrics[decorator.metric_name] = decorator.metric
-        return named_metrics
+        assert self._upstream is not None
+        named: dict[str, FinancialMetric] = {}
+        for d in self._upstream:
+            if isinstance(d, FinancialMetricCacheDecorator):
+                named[d.metric_name] = d.metric
+        return named
 
     @property
     def metrics(self) -> list[FinancialMetric]:
-        """The bare metric requests (without names) — useful for tests
-        that just want to see what got registered."""
+        """The bare metric requests (no alias) — handy in tests."""
         return list(self._named_metrics.values())
 
-    def _build_from_upstream(self) -> pl.DataFrame:
-        """Pick the lone table upstream out of the mix and build it.
-
-        The cache upstreams are config-only and don't contribute to
-        the table — they're consumed via :attr:`_named_metrics`.
-        """
+    def _build_from_upstream(self) -> KnowledgeBase:
         assert self._upstream is not None
         table_upstreams = [
             d
@@ -277,71 +331,59 @@ class FinancialsDecorator(TableDecorator):
         if len(table_upstreams) != 1:
             msg = (
                 "FinancialsDecorator expects exactly one non-cache upstream "
-                f"to provide the table; got {len(table_upstreams)}."
+                f"to provide the KnowledgeBase; got {len(table_upstreams)}."
             )
             raise ValueError(msg)
-        return table_upstreams[0]._build_df()
+        return table_upstreams[0]._build_kb()
 
-    def _build_df(self) -> pl.DataFrame:
-        upstream_df = self._build_from_upstream_or_error()
-
-        # No metrics requested — pass the upstream through untouched
-        # so we don't make a wasted API call.
-        if not self._named_metrics:
-            return upstream_df
-
-        tickers: list[str] = upstream_df[cols.TICKER].to_list()
-        ordered_names = list(self._named_metrics)
-        ordered_metrics = [self._named_metrics[n] for n in ordered_names]
+    def _build_kb(self) -> KnowledgeBase:
+        kb = self._build_from_upstream_or_error()
+        named = self._named_metrics
+        if not named:
+            return kb
+        tickers = list(kb.stock_data)
+        ordered_aliases = list(named)
+        ordered_metrics = [named[a] for a in ordered_aliases]
         metrics_df = build_financials_df(tickers=tickers, metrics=ordered_metrics)
-        # Re-label each column from the SDK's auto-generated metric.label
-        # to the user-supplied name.
-        rename_map = {self._named_metrics[name].label: name for name in ordered_names}
-        metrics_df = metrics_df.rename(rename_map)
-        # Polars DataFrames support .join(); GT objects do not.
-        return upstream_df.join(metrics_df, on=cols.TICKER, how="inner")
-
-    def build(self) -> GT:
-        df = self._build_df()
-        return (
-            GT(df)
-            .tab_header(
-                title="Tickers with Financial Metrics",
-                subtitle=(
-                    f"{df.height} tickers · {len(self._named_metrics)} "
-                    "financial metric(s)"
-                ),
-            )
-            .sub_missing(missing_text="—")
+        label_to_alias = {named[a].label: a for a in ordered_aliases}
+        for row in metrics_df.iter_rows(named=True):
+            ticker = row.get(cols.TICKER)
+            if ticker is None:
+                continue
+            stock = kb.stock_data.get(ticker)
+            if stock is None:
+                continue
+            for label, alias in label_to_alias.items():
+                value = row.get(label)
+                stock.numeric_metrics[alias] = (
+                    float(value) if value is not None else None
+                )
+        for alias, metric in named.items():
+            kb.alias_map[alias] = metric
+        logger.info(
+            "FinancialsDecorator: %d metric(s) × %d ticker(s)",
+            len(named),
+            len(tickers),
         )
+        return kb
 
 
-class ComputedMetricDecorator(TableDecorator):
-    """Add a computed-metric column derived from a Python-arithmetic expression.
+# ── Computed metric (scalar arithmetic) ──────────────────────────────
 
-    DSL: ``COMPUTED_METRIC <name> <expression>``.  *expression* is a
-    plain Python arithmetic expression whose identifiers reference
-    upstream columns — typically those added by ``FINANCIAL_METRIC``
-    lines (each labelled with its user-supplied name) or earlier
-    ``COMPUTED_METRIC`` lines.  Allowed operators: ``+ - * / ** %``,
-    unary ``±`` and parens; numeric literals are fine.
 
-    Example::
+class ComputedMetricDecorator(KnowledgeBaseDecorator):
+    """Add a derived scalar metric defined by a Python arithmetic expression.
 
-        # After FINANCIAL_METRIC fm2 NET_INCOME 2025 4
-        #       FINANCIAL_METRIC fm3 TOTAL_ASSETS 2025 4
-        #       FINANCIAL_METRIC fm4 TOTAL_ASSETS 2025 3
-        deco = ComputedMetricDecorator(
-            name="cm1",
-            expression="(fm2 * 2) / (fm3 + fm4)",
-            upstream=fin_decorator,
-        )
+    Identifiers in the expression resolve against names already present
+    in ``stock.numeric_metrics`` (from earlier ``FINANCIAL_METRIC`` /
+    ``COMPUTED_METRIC`` / ``TIME_SERIES_METRIC`` / ``RSI`` / ``SMA`` /
+    ``STOCHASTIC_OSCILLATOR`` lines).  Allowed: ``+ - * / ** %``,
+    unary ``±``, parens, and numeric literals.
 
-    Evaluation parses with :mod:`ast` rather than ``eval``, so no
-    arbitrary code can run; the AST is validated against an allow-list
-    of node types at construction time.  Per-ticker, ``None``
-    propagates cleanly for any missing operand, divide-by-zero, or
-    modulo-by-zero so a single bad data point doesn't sink the column.
+    Evaluation parses with :mod:`ast` (not ``eval``); the AST is
+    validated against an allow-list at construction time.  ``None``
+    propagates for any missing operand, divide-by-zero, or mod-by-zero
+    so a single bad data point doesn't sink the whole metric.
     """
 
     _ALLOWED_BINOPS: tuple[type[ast.operator], ...] = (
@@ -354,7 +396,7 @@ class ComputedMetricDecorator(TableDecorator):
     )
     _ALLOWED_UNARYOPS: tuple[type[ast.unaryop], ...] = (ast.UAdd, ast.USub)
 
-    def __init__(self, name: str, expression: str, *upstream: TableDecorator):
+    def __init__(self, name: str, expression: str, *upstream: KnowledgeBaseDecorator):
         super().__init__(upstream)
         self._name = name
         self._expression = expression
@@ -375,15 +417,12 @@ class ComputedMetricDecorator(TableDecorator):
             self._referenced_names,
         )
 
-    # ── Parsing helpers ──────────────────────────────────────────────
-
     @classmethod
     def _collect_names(cls, node: ast.AST) -> set[str]:
         return {sub.id for sub in ast.walk(node) if isinstance(sub, ast.Name)}
 
     @classmethod
     def _validate(cls, node: ast.AST) -> None:
-        """Walk the AST and raise on anything outside the allowed subset."""
         for sub in ast.walk(node):
             if isinstance(sub, ast.Name):
                 continue
@@ -410,23 +449,14 @@ class ComputedMetricDecorator(TableDecorator):
             )
             raise ValueError(msg)
 
-    # ── Safe AST evaluation ──────────────────────────────────────────
-
     @classmethod
     def _evaluate(
         cls,
         node: ast.AST,
-        env: dict[str, float | None],
+        env: Mapping[str, float | None],
     ) -> float | None:
-        """Recursively evaluate the AST using *env* for placeholders.
-
-        Returns *None* if any referenced value is missing or if a
-        division-by-zero is encountered, so a single missing data point
-        propagates as a missing result rather than an exception.
-        """
         if isinstance(node, ast.Expression):
             return cls._evaluate(node.body, env)
-
         if isinstance(node, ast.BinOp):
             left = cls._evaluate(node.left, env)
             right = cls._evaluate(node.right, env)
@@ -451,141 +481,111 @@ class ComputedMetricDecorator(TableDecorator):
                 return left % right
             msg = f"Unsupported binary operator: {type(op).__name__}"
             raise ValueError(msg)
-
         if isinstance(node, ast.UnaryOp):
-            operand = cls._evaluate(node.operand, env)
-            if operand is None:
+            operand_value = cls._evaluate(node.operand, env)
+            if operand_value is None:
                 return None
             if isinstance(node.op, ast.USub):
-                return -operand
+                return -operand_value
             if isinstance(node.op, ast.UAdd):
-                return operand
+                return operand_value
             msg = f"Unsupported unary operator: {type(node.op).__name__}"
             raise ValueError(msg)
-
         if isinstance(node, ast.Constant):
             value = node.value
             if isinstance(value, int | float):
                 return float(value)
             msg = f"Unsupported literal: {value!r}"
             raise ValueError(msg)
-
         if isinstance(node, ast.Name):
             return env.get(node.id)
-
         msg = f"Unsupported expression node: {type(node).__name__}"
         raise ValueError(msg)
 
-    # ── Build ────────────────────────────────────────────────────────
-
-    def _build_df(self) -> pl.DataFrame:
-        upstream_df = self._build_from_upstream_or_error()
-
-        missing = [n for n in self._referenced_names if n not in upstream_df.columns]
-        if missing:
-            msg = (
-                f"COMPUTED_METRIC {self._name!r} expression references "
-                f"unknown name(s) {missing!r}. "
-                f"Available columns: {upstream_df.columns}."
-            )
-            raise ValueError(msg)
-
-        computed: list[float | None] = []
-        for row in upstream_df.iter_rows(named=True):
+    def _build_kb(self) -> KnowledgeBase:
+        kb = self._build_from_upstream_or_error()
+        non_null = 0
+        for stock in kb.stock_data.values():
             env: dict[str, float | None] = {}
             for n in self._referenced_names:
-                raw = row.get(n)
-                env[n] = float(raw) if raw is not None else None
+                env[n] = stock.numeric_metrics.get(n)
             try:
                 value = self._evaluate(self._ast_tree, env)
             except TypeError, ZeroDivisionError, OverflowError:
                 value = None
-            computed.append(value)
-
+            stock.numeric_metrics[self._name] = value
+            if value is not None:
+                non_null += 1
         logger.info(
-            "Computed %r for %d tickers (%d non-null)",
+            "ComputedMetricDecorator %r: %d ticker(s) (%d non-null)",
             self._name,
-            len(computed),
-            sum(1 for v in computed if v is not None),
+            len(kb.stock_data),
+            non_null,
         )
-
-        return upstream_df.with_columns(
-            pl.Series(name=self._name, values=computed, dtype=pl.Float64)
-        )
-
-    def build(self) -> GT:
-        df = self._build_df()
-        return (
-            GT(df)
-            .tab_header(
-                title=f"With Computed Metric: {self._name}",
-                subtitle=f"{df.height} tickers",
-            )
-            .sub_missing(missing_text="—")
-        )
+        return kb
 
 
-class TimeSeriesCacheDecorator(TableDecorator):
-    """Side-channel stage that memoises one ``TimeSeriesDef``'s fetches.
+# ── Time-series cache (raw OHLC fetch) ───────────────────────────────
 
-    Inserted between two stages, it leaves the tabular pipeline
-    unchanged (``_build_df`` and ``build`` pass straight through to
-    the upstream), but intercepts the chain-walking
-    :meth:`TableDecorator.get_time_series` call so downstream
-    consumers share a single network round-trip per ticker.
 
-    A cache only serves the ``TimeSeriesDef`` it was created with —
-    requests for other definitions fall through to upstream stages.
+class TimeSeriesCacheDecorator(KnowledgeBaseDecorator):
+    """Fetch and store one OHLC series per ticker under a DSL alias.
+
+    Registers ``alias_map[alias] = ts_def`` and populates
+    ``stock.numeric_time_series[alias]`` for every stock in scope.  The
+    fetch is eager — once stock_data has been subset (by SAME_SIC /
+    PICK_TICKERS), this stage hits the API once per surviving ticker.
     """
 
-    def __init__(self, ts_def: TimeSeriesDef, *upstream: TableDecorator):
+    def __init__(
+        self,
+        alias: str,
+        ts_def: TimeSeriesDef,
+        *upstream: KnowledgeBaseDecorator,
+    ):
         super().__init__(upstream)
+        self._name = alias
         self._ts_def = ts_def
-        self._cache: dict[str, Sequence[float]] = {}
 
-    def _build_df(self) -> pl.DataFrame:
-        return self._build_from_upstream_or_error()
-
-    def build(self) -> GT:
-        return GT(self._build_df())
-
-    def get_time_series(self, ticker: str, ts_def: TimeSeriesDef) -> Sequence[float]:
-        if ts_def != self._ts_def:
-            return self.get_time_series_from_upstream(ticker, ts_def)
-        if ticker in self._cache:
-            return self._cache[ticker]
-        values = get_time_series(ticker, self._ts_def)
-        self._cache[ticker] = values
-        return values
+    def _build_kb(self) -> KnowledgeBase:
+        kb = self._build_from_upstream_or_error()
+        kb.alias_map[self._name] = self._ts_def
+        for ticker, stock in kb.stock_data.items():
+            values = get_time_series(ticker, self._ts_def)
+            stock.numeric_time_series[self._name] = list(values)
+        logger.info(
+            "TimeSeriesCacheDecorator %r: fetched %d ticker(s)",
+            self._name,
+            len(kb.stock_data),
+        )
+        return kb
 
 
 # ── Scalar reducers over a time series ───────────────────────────────
 
 
 type TimeSeriesScalarMetric = Callable[[Sequence[float]], float | None]
-"""A function that reduces a time series to one scalar (or ``None``)."""
 
 
 def _rsquared_trend(series: Sequence[float]) -> float | None:
     """R² of a least-squares linear fit of *series* against its index.
 
-    Equivalent to the squared Pearson correlation between the bar
-    index (0, 1, 2, …) and the value at that bar.  A series that
-    trends perfectly linearly scores 1.0; a flat or noisy series
-    scores near 0.
-
-    Returns ``None`` for series too short to fit (< 2 points) or with
-    zero variance (constant series — R² is undefined).
+    Equivalent to the squared Pearson correlation between the bar index
+    (0, 1, 2, …) and the value at that bar.  A linear trend scores 1.0;
+    a flat or noisy series scores near 0.  Returns ``None`` for series
+    too short (< 2 valid points after dropping NaNs) or with zero
+    variance.  NaN-padded warmup from upstream indicators is dropped so
+    R² can be applied to an RSI or SMA series cleanly.
     """
     arr = np.asarray(series, dtype=np.float64)
-    if arr.size < 2:
+    valid = ~np.isnan(arr)
+    if int(valid.sum()) < 2:
         return None
-    # Short-circuit on a constant series — np.corrcoef would emit a
-    # divide-by-zero RuntimeWarning and return NaN here.
-    if arr.var() == 0.0:
+    xs = np.arange(arr.size, dtype=np.float64)[valid]
+    ys = arr[valid]
+    if float(ys.var()) == 0.0:
         return None
-    xs = np.arange(arr.size, dtype=np.float64)
-    r = np.corrcoef(xs, arr)[0, 1]
+    r = np.corrcoef(xs, ys)[0, 1]
     if not np.isfinite(r):
         return None
     return float(r * r)
@@ -597,43 +597,23 @@ _TIME_SERIES_METRICS: dict[str, TimeSeriesScalarMetric] = {
 
 
 def register_time_series_metric(name: str, fn: TimeSeriesScalarMetric) -> None:
-    """Register a scalar reducer so it's callable from the DSL or directly.
-
-    Once registered, ``TimeSeriesMetricDecorator(metric=name, ...)``
-    and ``TIME_SERIES_METRIC <name> <ts>`` in the builder DSL both
-    pick *fn* up by name.  Names are matched case-sensitively to
-    match the DSL surface.
-
-    Args:
-        name: Public name (and resulting column header).
-        fn: ``(Sequence[float]) -> float | None`` reducer.  Return
-            ``None`` to signal "no value" — the column dtype is
-            ``Float64`` so nulls flow through naturally.
-    """
     _TIME_SERIES_METRICS[name] = fn
 
 
 def available_time_series_metrics() -> list[str]:
-    """Return the names of all registered scalar reducers, sorted."""
     return sorted(_TIME_SERIES_METRICS)
 
 
-class TimeSeriesDerivedDecorator(TableDecorator):
-    """Define a new time series as arithmetic over previously-declared ones.
+# ── Time-series derivations and reductions ───────────────────────────
 
-    Drop-in pass-through for the tabular pipeline (``_build_df`` and
-    ``build`` delegate to the upstream), but exposes a fresh series
-    via the chain-walking :meth:`TableDecorator.get_time_series` hook.
-    Downstream stages (typically a :class:`TimeSeriesMetricDecorator`)
-    read the derived series by its own :class:`TimeSeriesDef` exactly
-    like any other producer.
 
-    Expressions are restricted to ``+``, ``-``, ``*``, ``/``, unary
-    minus, and numeric constants over the named operand series.
-    Element-wise evaluation goes through numpy so scalar broadcasting
-    works (``2*ts1 - ts2``).  Operand series must align bar-by-bar —
-    when they don't, numpy raises during the first ticker's fetch and
-    the error surfaces with the offending pair.
+class TimeSeriesDerivedDecorator(KnowledgeBaseDecorator):
+    """Define a new series as arithmetic over previously-stored ones.
+
+    Reads operand series from each :class:`Stock`'s ``numeric_time_series``
+    by alias, evaluates the expression element-wise via numpy (broadcasting
+    works), and writes the result under the new alias.  Allowed operators:
+    ``+ - * /``, unary minus, numeric literals.
     """
 
     _ALLOWED_BINOPS: tuple[type[ast.operator], ...] = (
@@ -651,14 +631,16 @@ class TimeSeriesDerivedDecorator(TableDecorator):
 
     def __init__(
         self,
-        derived_ts_def: TimeSeriesDef,
+        alias: str,
         expression: str,
-        operand_ts_defs: Mapping[str, TimeSeriesDef],
-        *upstream_decorators: TableDecorator,
+        known_aliases: Sequence[str],
+        derived_ts_def: TimeSeriesDef,
+        *upstream: KnowledgeBaseDecorator,
     ):
-        super().__init__(upstream_decorators)
-        self._ts_def = derived_ts_def
+        super().__init__(upstream)
+        self._name = alias
         self._expression = expression
+        self._derived_ts_def = derived_ts_def
         try:
             self._ast_tree = ast.parse(expression, mode="eval").body
         except SyntaxError as err:
@@ -667,21 +649,15 @@ class TimeSeriesDerivedDecorator(TableDecorator):
                 f"valid Python syntax: {err.msg}"
             )
             raise ValueError(msg) from err
-        # Validate AST early so a typo doesn't only surface mid-build.
         self._validate(self._ast_tree)
         self._operand_names = sorted(self._collect_names(self._ast_tree))
-        missing = [n for n in self._operand_names if n not in operand_ts_defs]
+        missing = [n for n in self._operand_names if n not in set(known_aliases)]
         if missing:
             msg = (
                 f"TIME_SERIES_DERIVED expression {expression!r} refers to "
-                f"undefined names {missing!r}. "
-                f"Defined: {sorted(operand_ts_defs)}."
+                f"undefined names {missing!r}. Defined: {sorted(known_aliases)}."
             )
             raise ValueError(msg)
-        self._operand_ts_defs: dict[str, TimeSeriesDef] = {
-            n: operand_ts_defs[n] for n in self._operand_names
-        }
-        self._cache: dict[str, list[float]] = {}
 
     @classmethod
     def _collect_names(cls, node: ast.AST) -> set[str]:
@@ -689,7 +665,6 @@ class TimeSeriesDerivedDecorator(TableDecorator):
 
     @classmethod
     def _validate(cls, node: ast.AST) -> None:
-        """Walk the AST and raise on anything outside the allowed subset."""
         for sub in ast.walk(node):
             if isinstance(sub, ast.Name):
                 continue
@@ -708,42 +683,12 @@ class TimeSeriesDerivedDecorator(TableDecorator):
             if isinstance(sub, ast.Expression):
                 continue
             if isinstance(sub, ast.operator | ast.unaryop | ast.expr_context):
-                # AST visits operators and load/store contexts on their
-                # own; the BinOp/UnaryOp/Name checks above cover their
-                # enclosing nodes, so a bare visit here is fine.
                 continue
             msg = (
                 "TIME_SERIES_DERIVED expression contains an unsupported "
                 f"construct: {type(sub).__name__}"
             )
             raise ValueError(msg)
-
-    def _build_df(self) -> pl.DataFrame:
-        return self._build_from_upstream_or_error()
-
-    def build(self) -> GT:
-        return GT(self._build_df())
-
-    def get_time_series(self, ticker: str, ts_def: TimeSeriesDef) -> Sequence[float]:
-        if ts_def != self._ts_def:
-            return self.get_time_series_from_upstream(ticker, ts_def)
-        if ticker in self._cache:
-            return self._cache[ticker]
-        if self._upstream is None:
-            raise NoUpstreamError(
-                "TimeSeriesDerivedDecorator needs an upstream to fetch operands"
-            )
-        operands: dict[str, np.ndarray] = {
-            name: np.asarray(
-                self.get_time_series_from_upstream(ticker, self._operand_ts_defs[name]),
-                dtype=np.float64,
-            )
-            for name in self._operand_names
-        }
-        result = self._evaluate(self._ast_tree, operands)
-        values: list[float] = np.asarray(result, dtype=np.float64).tolist()
-        self._cache[ticker] = values
-        return values
 
     @classmethod
     def _evaluate(
@@ -761,80 +706,87 @@ class TimeSeriesDerivedDecorator(TableDecorator):
             left = cls._evaluate(node.left, operands)
             right = cls._evaluate(node.right, operands)
             return cls._BINOP_FUNCS[type(node.op)](left, right)
-        # Should never hit this branch — _validate ran at construction
-        # time — but keep the message friendly if it ever does.
         msg = (
             "TIME_SERIES_DERIVED expression contains an unsupported "
             f"construct at runtime: {type(node).__name__}"
         )
         raise ValueError(msg)
 
+    def _build_kb(self) -> KnowledgeBase:
+        kb = self._build_from_upstream_or_error()
+        kb.alias_map[self._name] = self._derived_ts_def
+        for stock in kb.stock_data.values():
+            operands: dict[str, np.ndarray] = {}
+            missing = False
+            for n in self._operand_names:
+                series = stock.numeric_time_series.get(n)
+                if series is None:
+                    missing = True
+                    break
+                operands[n] = np.asarray(series, dtype=np.float64)
+            if missing:
+                stock.numeric_time_series[self._name] = []
+                continue
+            result = self._evaluate(self._ast_tree, operands)
+            stock.numeric_time_series[self._name] = np.asarray(
+                result, dtype=np.float64
+            ).tolist()
+        logger.info(
+            "TimeSeriesDerivedDecorator %r: applied to %d ticker(s)",
+            self._name,
+            len(kb.stock_data),
+        )
+        return kb
 
-class TimeSeriesMetricDecorator(TableDecorator):
-    """Add a named scalar column derived from a per-ticker time series.
 
-    For every ticker in the upstream table, pulls the series via
-    :meth:`TableDecorator.get_time_series` (which walks the chain to a
-    producer — typically :class:`TimeSeriesCacheDecorator`) and
-    applies a named scalar reducer from
-    :data:`_TIME_SERIES_METRICS` (e.g. ``"RSquared"``).  The reducer's
-    return value lands in a new ``Float64`` column carrying the
-    user-supplied *name*, mirroring how ``FINANCIAL_METRIC`` and
-    ``COMPUTED_METRIC`` lines label their output.
+class TimeSeriesMetricDecorator(KnowledgeBaseDecorator):
+    """Reduce a per-ticker series to one scalar via a registered metric.
 
-    Register additional reducers via
-    :func:`register_time_series_metric`.  Wrap with a
-    :class:`TimeSeriesCacheDecorator` upstream so the network is hit
-    once per ticker even when several metric columns share a series.
+    Looks up the series by its alias on each :class:`Stock` and writes
+    the reducer's output into ``stock.numeric_metrics[alias]``.  Use
+    :func:`register_time_series_metric` to add reducers; built-ins
+    include ``"RSquared"``.
     """
 
     def __init__(
         self,
-        ts_def: TimeSeriesDef,
-        name: str,
+        alias: str,
+        source_alias: str,
         metric: str,
-        *upstream_decorators: TableDecorator,
+        *upstream: KnowledgeBaseDecorator,
     ):
-        super().__init__(upstream_decorators)
+        super().__init__(upstream)
         if metric not in _TIME_SERIES_METRICS:
             msg = (
                 f"Unknown time-series metric {metric!r}. "
                 f"Available: {available_time_series_metrics()}."
             )
             raise ValueError(msg)
-        self._ts_def = ts_def
-        self._name = name
+        self._name = alias
+        self._source_alias = source_alias
         self._metric_name = metric
         self._metric_fn = _TIME_SERIES_METRICS[metric]
 
-    def _build_df(self) -> pl.DataFrame:
-        upstream_df = self._build_from_upstream_or_error()
-        tickers: list[str] = upstream_df[cols.TICKER].to_list()
-        values: list[float | None] = []
-        for ticker in tickers:
-            series = self.get_time_series(ticker, self._ts_def)
-            values.append(self._metric_fn(series))
+    def _build_kb(self) -> KnowledgeBase:
+        kb = self._build_from_upstream_or_error()
+        non_null = 0
+        for stock in kb.stock_data.values():
+            series = stock.numeric_time_series.get(self._source_alias)
+            if series is None:
+                stock.numeric_metrics[self._name] = None
+                continue
+            value = self._metric_fn(series)
+            stock.numeric_metrics[self._name] = value
+            if value is not None:
+                non_null += 1
         logger.info(
-            "Computed %r (metric=%r) for %d tickers (%d non-null)",
+            "TimeSeriesMetricDecorator %r (metric=%r): %d ticker(s) (%d non-null)",
             self._name,
             self._metric_name,
-            len(values),
-            sum(1 for v in values if v is not None),
+            len(kb.stock_data),
+            non_null,
         )
-        return upstream_df.with_columns(
-            pl.Series(name=self._name, values=values, dtype=pl.Float64)
-        )
-
-    def build(self) -> GT:
-        df = self._build_df()
-        return (
-            GT(df)
-            .tab_header(
-                title=(f"With Time-Series Metric: {self._name} ({self._metric_name})"),
-                subtitle=f"{df.height} tickers",
-            )
-            .sub_missing(missing_text="—")
-        )
+        return kb
 
 
 # ── Stochastic oscillator ────────────────────────────────────────────
@@ -847,49 +799,19 @@ def stochastic_oscillator(
     k_period: int,
     d_period: int,
 ) -> tuple[list[float | None], list[float | None]]:
-    """Compute the classic stochastic-oscillator %K and %D series.
-
-    For each bar ``i`` (0-indexed) over the input series:
-
-    * ``%K_i = 100 * (close_i - min(low[i-k+1 .. i])) /
-              (max(high[i-k+1 .. i]) - min(low[i-k+1 .. i]))``
-
-      First ``k_period - 1`` bars have ``None`` (window not yet full).
-      Returns ``None`` when the window's range collapses to zero (no
-      movement → oscillator undefined).
-
-    * ``%D_i = simple moving average of %K over d_period``
-
-      First ``k_period - 1 + d_period - 1`` bars have ``None``;  if any
-      of the last ``d_period`` %K values are ``None`` the average is
-      also ``None``.
-
-    Args:
-        highs: bar-high series.
-        lows: bar-low series.
-        closes: bar-close series.
-        k_period: lookback window for %K.  Typical value: 14.
-        d_period: SMA window for %D.  Typical value: 3.
-
-    Returns:
-        ``(%K series, %D series)`` — both lists of length
-        ``min(len(highs), len(lows), len(closes))``.
-    """
+    """Compute the classic stochastic-oscillator %K and %D series."""
     if k_period < 1 or d_period < 1:
         msg = (
             f"stochastic_oscillator periods must be >= 1; "
             f"got k_period={k_period}, d_period={d_period}"
         )
         raise ValueError(msg)
-
     n = min(len(highs), len(lows), len(closes))
     if n == 0:
         return [], []
-
     highs_arr = np.asarray(highs[:n], dtype=np.float64)
     lows_arr = np.asarray(lows[:n], dtype=np.float64)
     closes_arr = np.asarray(closes[:n], dtype=np.float64)
-
     k_values: list[float | None] = []
     for i in range(n):
         if i < k_period - 1:
@@ -902,7 +824,6 @@ def stochastic_oscillator(
             k_values.append(None)
             continue
         k_values.append(100.0 * (float(closes_arr[i]) - window_low) / denom)
-
     d_values: list[float | None] = []
     warmup = k_period - 1 + d_period - 1
     for i in range(n):
@@ -913,45 +834,31 @@ def stochastic_oscillator(
         if any(v is None for v in window):
             d_values.append(None)
             continue
-        # Cast for ty — we just verified none are None.
         d_values.append(sum(v for v in window if v is not None) / d_period)
-
     return k_values, d_values
 
 
-class StochasticOscillatorDecorator(TableDecorator):
-    """Add latest %K and %D stochastic-oscillator values per ticker.
+class StochasticOscillatorDecorator(KnowledgeBaseDecorator):
+    """Compute %K and %D and store them as time series + latest scalars.
 
-    DSL form::
-
-        STOCHASTIC_OSCILLATOR <name> <ts_high> <ts_low> <ts_close> \\
-                              <k_period> <d_period>
-
-    Output columns: ``<name>_k`` and ``<name>_d`` (Float64), holding
-    each ticker's *latest* %K and %D respectively.  ``None`` flows
-    through cleanly when the series is too short, when the bar's
-    window has zero range, or when any of the three OHLC series is
-    empty.
-
-    Periods are parametrizable:  the classic chart-trader defaults
-    are ``k_period=14``, ``d_period=3``, but anything ``>=1`` works.
-
-    Three :class:`TimeSeriesDef`'s must be supplied (high / low /
-    close) — the decorator pulls each from the chain via
-    :meth:`get_time_series`, so the natural upstream is a stack of
-    three :class:`TimeSeriesCacheDecorator`'s declared via
-    ``TIME_SERIES`` lines.
+    Writes the **full** %K and %D series under
+    ``stock.numeric_time_series["<name>_k"]`` and ``"<name>_d"`` (so
+    downstream indicators can chain off them), and the latest values
+    into ``stock.numeric_metrics`` under the same keys.  Both indicator
+    aliases are registered in ``alias_map`` against a synthesised
+    :class:`TimeSeriesDef` cloned from the close-series shape.
     """
 
     def __init__(
         self,
         name: str,
-        ts_high_def: TimeSeriesDef,
-        ts_low_def: TimeSeriesDef,
-        ts_close_def: TimeSeriesDef,
+        ts_high_alias: str,
+        ts_low_alias: str,
+        ts_close_alias: str,
         k_period: int,
         d_period: int,
-        *upstream: TableDecorator,
+        close_ts_def: TimeSeriesDef,
+        *upstream: KnowledgeBaseDecorator,
     ):
         super().__init__(upstream)
         if k_period < 1 or d_period < 1:
@@ -961,59 +868,67 @@ class StochasticOscillatorDecorator(TableDecorator):
             )
             raise ValueError(msg)
         self._name = name
-        self._ts_high_def = ts_high_def
-        self._ts_low_def = ts_low_def
-        self._ts_close_def = ts_close_def
+        self._ts_high_alias = ts_high_alias
+        self._ts_low_alias = ts_low_alias
+        self._ts_close_alias = ts_close_alias
         self._k_period = k_period
         self._d_period = d_period
+        self._k_alias = f"{name}_k"
+        self._d_alias = f"{name}_d"
+        # Indicator series inherit the close series' time shape so a
+        # downstream SMA/RSI on them gets a coherent TimeSeriesDef.
+        self._k_ts_def = TimeSeriesDef(
+            name=close_ts_def.name,
+            span=close_ts_def.span,
+            start=close_ts_def.start,
+            end=close_ts_def.end,
+            multiplier=close_ts_def.multiplier,
+            tag=self._k_alias,
+        )
+        self._d_ts_def = TimeSeriesDef(
+            name=close_ts_def.name,
+            span=close_ts_def.span,
+            start=close_ts_def.start,
+            end=close_ts_def.end,
+            multiplier=close_ts_def.multiplier,
+            tag=self._d_alias,
+        )
 
-    def _build_df(self) -> pl.DataFrame:
-        upstream_df = self._build_from_upstream_or_error()
-        tickers: list[str] = upstream_df[cols.TICKER].to_list()
-        k_values: list[float | None] = []
-        d_values: list[float | None] = []
-        for ticker in tickers:
-            try:
-                highs = self.get_time_series(ticker, self._ts_high_def)
-                lows = self.get_time_series(ticker, self._ts_low_def)
-                closes = self.get_time_series(ticker, self._ts_close_def)
-            except TimeSeriesNotAvailableError:
-                # Defensive — the DSL should already have wired a
-                # producer for every ts_def we hold, so reaching here
-                # means a manually-built chain is missing one.
-                k_values.append(None)
-                d_values.append(None)
+    def _build_kb(self) -> KnowledgeBase:
+        kb = self._build_from_upstream_or_error()
+        kb.alias_map[self._k_alias] = self._k_ts_def
+        kb.alias_map[self._d_alias] = self._d_ts_def
+        for stock in kb.stock_data.values():
+            highs = stock.numeric_time_series.get(self._ts_high_alias)
+            lows = stock.numeric_time_series.get(self._ts_low_alias)
+            closes = stock.numeric_time_series.get(self._ts_close_alias)
+            if highs is None or lows is None or closes is None:
+                stock.numeric_time_series[self._k_alias] = []
+                stock.numeric_time_series[self._d_alias] = []
+                stock.numeric_metrics[self._k_alias] = None
+                stock.numeric_metrics[self._d_alias] = None
                 continue
             k_series, d_series = stochastic_oscillator(
                 highs, lows, closes, self._k_period, self._d_period
             )
-            k_values.append(k_series[-1] if k_series else None)
-            d_values.append(d_series[-1] if d_series else None)
+            # None entries can't sit in a list[float]; store as raw list
+            # with a parallel "latest non-None scalar" for the metric.
+            stock.numeric_time_series[self._k_alias] = [
+                v if v is not None else float("nan") for v in k_series
+            ]
+            stock.numeric_time_series[self._d_alias] = [
+                v if v is not None else float("nan") for v in d_series
+            ]
+            stock.numeric_metrics[self._k_alias] = k_series[-1] if k_series else None
+            stock.numeric_metrics[self._d_alias] = d_series[-1] if d_series else None
         logger.info(
-            "Computed stochastic %r (k=%d, d=%d) for %d tickers",
+            "StochasticOscillatorDecorator %r (k=%d, d=%d): %d ticker(s)",
             self._name,
             self._k_period,
             self._d_period,
-            len(tickers),
+            len(kb.stock_data),
         )
-        return upstream_df.with_columns(
-            pl.Series(name=f"{self._name}_k", values=k_values, dtype=pl.Float64),
-            pl.Series(name=f"{self._name}_d", values=d_values, dtype=pl.Float64),
-        )
-
-    def build(self) -> GT:
-        df = self._build_df()
-        return (
-            GT(df)
-            .tab_header(
-                title=(
-                    f"With Stochastic Oscillator: {self._name} "
-                    f"(k={self._k_period}, d={self._d_period})"
-                ),
-                subtitle=f"{df.height} tickers",
-            )
-            .sub_missing(missing_text="—")
-        )
+        return kb
 
 
 # ── Relative Strength Index (Wilder's smoothing) ─────────────────────
@@ -1023,55 +938,15 @@ def relative_strength_index(
     closes: Sequence[float],
     period: int,
 ) -> list[float | None]:
-    """Compute Wilder's Relative Strength Index series.
-
-    For each bar ``i``::
-
-        delta_i  = close_i - close_{i-1}
-        gain_i   = max(delta_i, 0)
-        loss_i   = max(-delta_i, 0)
-
-    Initial averages seed from the first ``period`` gains/losses
-    (simple mean).  Subsequent bars use **Wilder's smoothing**::
-
-        avg_gain_i = (avg_gain_{i-1} * (period - 1) + gain_i) / period
-        avg_loss_i = (avg_loss_{i-1} * (period - 1) + loss_i) / period
-
-    Then::
-
-        RS_i  = avg_gain_i / avg_loss_i
-        RSI_i = 100 - 100 / (1 + RS_i)
-
-    Special cases:
-
-    * ``avg_gain == 0`` *and* ``avg_loss == 0`` (constant prices over
-      the window) — RSI is undefined, return ``None``.
-    * ``avg_loss == 0`` and ``avg_gain > 0`` — RSI = 100 (only gains).
-    * The first ``period`` bars don't have a valid value (warmup) and
-      return ``None``.
-
-    Args:
-        closes: bar-close series, in chronological order.
-        period: lookback window for the moving averages.  Classic
-            chart-trader default is 14.
-
-    Returns:
-        A list of length ``len(closes)`` with ``None`` for warmup /
-        undefined entries.
-
-    Raises:
-        ValueError: If ``period < 1``.
-    """
+    """Compute Wilder's Relative Strength Index series."""
     if period < 1:
         msg = f"RSI period must be >= 1; got {period}"
         raise ValueError(msg)
-
     n = len(closes)
     if n < period + 1:
         return [None] * n
-
     arr = np.asarray(closes, dtype=np.float64)
-    deltas = np.diff(arr)  # length n - 1
+    deltas = np.diff(arr)
     gains = np.where(deltas > 0, deltas, 0.0)
     losses = np.where(deltas < 0, -deltas, 0.0)
 
@@ -1083,87 +958,73 @@ def relative_strength_index(
         rs = g / ll
         return 100.0 - 100.0 / (1.0 + rs)
 
-    # SMA seed over the first `period` deltas; the resulting RSI lands
-    # at bar `period` (since deltas[0..period-1] cover closes[0..period]).
     avg_gain = float(gains[:period].mean())
     avg_loss = float(losses[:period].mean())
-
     rsi: list[float | None] = [None] * n
     rsi[period] = _rsi_from(avg_gain, avg_loss)
-
     for i in range(period + 1, n):
         gain = float(gains[i - 1])
         loss = float(losses[i - 1])
         avg_gain = (avg_gain * (period - 1) + gain) / period
         avg_loss = (avg_loss * (period - 1) + loss) / period
         rsi[i] = _rsi_from(avg_gain, avg_loss)
-
     return rsi
 
 
-class RelativeStrengthIndexDecorator(TableDecorator):
-    """Add a latest-RSI column per ticker.
+class RelativeStrengthIndexDecorator(KnowledgeBaseDecorator):
+    """Compute Wilder's RSI and store as a time series + latest scalar.
 
-    DSL form::
-
-        RSI <name> <ts_close> <period>
-
-    Output column: ``<name>`` (Float64), holding each ticker's *latest*
-    Wilder-smoothed RSI.  ``None`` flows through cleanly when the close
-    series is too short, when the window has no movement (flat prices),
-    or when the cache can't serve the referenced ``ts_close``.
-
-    *period* is parametrizable: the classic chart-trader default is
-    14, but anything ``>= 1`` works.
+    Writes the **full** RSI series under ``stock.numeric_time_series[alias]``
+    and the latest value under ``stock.numeric_metrics[alias]``.
+    Registers ``alias_map[alias]`` against a derived TimeSeriesDef
+    cloned from the source close series.
     """
 
     def __init__(
         self,
         name: str,
-        ts_close_def: TimeSeriesDef,
+        ts_close_alias: str,
         period: int,
-        *upstream: TableDecorator,
+        close_ts_def: TimeSeriesDef,
+        *upstream: KnowledgeBaseDecorator,
     ):
         super().__init__(upstream)
         if period < 1:
             msg = f"RSI period must be >= 1; got {period}"
             raise ValueError(msg)
         self._name = name
-        self._ts_close_def = ts_close_def
+        self._ts_close_alias = ts_close_alias
         self._period = period
+        self._derived_ts_def = TimeSeriesDef(
+            name=close_ts_def.name,
+            span=close_ts_def.span,
+            start=close_ts_def.start,
+            end=close_ts_def.end,
+            multiplier=close_ts_def.multiplier,
+            tag=name,
+        )
 
-    def _build_df(self) -> pl.DataFrame:
-        upstream_df = self._build_from_upstream_or_error()
-        tickers: list[str] = upstream_df[cols.TICKER].to_list()
-        values: list[float | None] = []
-        for ticker in tickers:
-            try:
-                closes = self.get_time_series(ticker, self._ts_close_def)
-            except TimeSeriesNotAvailableError:
-                values.append(None)
+    def _build_kb(self) -> KnowledgeBase:
+        kb = self._build_from_upstream_or_error()
+        kb.alias_map[self._name] = self._derived_ts_def
+        for stock in kb.stock_data.values():
+            closes = stock.numeric_time_series.get(self._ts_close_alias)
+            if closes is None:
+                stock.numeric_time_series[self._name] = []
+                stock.numeric_metrics[self._name] = None
                 continue
             rsi_series = relative_strength_index(closes, self._period)
-            values.append(rsi_series[-1] if rsi_series else None)
+            stock.numeric_time_series[self._name] = [
+                v if v is not None else float("nan") for v in rsi_series
+            ]
+            stock.numeric_metrics[self._name] = rsi_series[-1] if rsi_series else None
         logger.info(
-            "Computed RSI %r (period=%d) for %d tickers",
+            "RelativeStrengthIndexDecorator %r (period=%d): %d ticker(s)",
             self._name,
             self._period,
-            len(tickers),
+            len(kb.stock_data),
         )
-        return upstream_df.with_columns(
-            pl.Series(name=self._name, values=values, dtype=pl.Float64)
-        )
-
-    def build(self) -> GT:
-        df = self._build_df()
-        return (
-            GT(df)
-            .tab_header(
-                title=f"With RSI: {self._name} (period={self._period})",
-                subtitle=f"{df.height} tickers",
-            )
-            .sub_missing(missing_text="—")
-        )
+        return kb
 
 
 # ── Simple Moving Average ────────────────────────────────────────────
@@ -1175,104 +1036,173 @@ def simple_moving_average(
 ) -> list[float | None]:
     """Compute the simple moving average series.
 
-    For each bar ``i``::
-
-        sma_i = mean(values[i - period + 1 .. i])
-
-    The first ``period - 1`` bars don't have a full window and return
-    ``None``.
-
-    Args:
-        values: input series, in chronological order.  Typically bar
-            closes, but any numeric series works.
-        period: window length.  Common choices are 20 (one trading
-            month), 50, 100, 200.
-
-    Returns:
-        A list of length ``len(values)`` with ``None`` for warmup
-        entries.
-
-    Raises:
-        ValueError: If ``period < 1``.
+    Bars whose window has fewer than ``period`` observations, or whose
+    window contains a ``NaN`` (which is how the pipeline encodes the
+    warmup of upstream indicators), produce ``None``.  This keeps SMA
+    composable with other indicators: stacking ``SMA smoothed rsi14 5``
+    on top of an RSI series still yields a usable scalar in the tail.
     """
     if period < 1:
         msg = f"SMA period must be >= 1; got {period}"
         raise ValueError(msg)
-
     n = len(values)
     if n == 0:
         return []
-
     arr = np.asarray(values, dtype=np.float64)
     sma: list[float | None] = [None] * n
-    # Cumulative-sum trick: window sum at i is cumsum[i+1] - cumsum[i+1-period].
-    cumsum = np.concatenate(([0.0], np.cumsum(arr)))
     for i in range(period - 1, n):
-        window_sum = float(cumsum[i + 1] - cumsum[i + 1 - period])
-        sma[i] = window_sum / period
+        window = arr[i - period + 1 : i + 1]
+        if bool(np.isnan(window).any()):
+            sma[i] = None
+            continue
+        sma[i] = float(window.mean())
     return sma
 
 
-class SimpleMovingAverageDecorator(TableDecorator):
-    """Add a latest-SMA column per ticker.
+class SimpleMovingAverageDecorator(KnowledgeBaseDecorator):
+    """Compute SMA and store as a time series + latest scalar.
 
-    DSL form::
-
-        SMA <name> <ts_close> <period>
-
-    Output column: ``<name>`` (Float64), holding each ticker's *latest*
-    simple moving average over the trailing ``period`` bars.  ``None``
-    flows through cleanly when the series is shorter than ``period`` or
-    when the cache can't serve the referenced series.
-
-    Any time series can be averaged — close, open, a derived spread —
-    not just closes; the ``ts_close`` name is just convention.
+    Works on any registered alias — raw closes, derived spreads, or
+    other indicator outputs.
     """
 
     def __init__(
         self,
         name: str,
-        ts_def: TimeSeriesDef,
+        ts_alias: str,
         period: int,
-        *upstream: TableDecorator,
+        source_ts_def: TimeSeriesDef,
+        *upstream: KnowledgeBaseDecorator,
     ):
         super().__init__(upstream)
         if period < 1:
             msg = f"SMA period must be >= 1; got {period}"
             raise ValueError(msg)
         self._name = name
-        self._ts_def = ts_def
+        self._ts_alias = ts_alias
         self._period = period
+        self._derived_ts_def = TimeSeriesDef(
+            name=source_ts_def.name,
+            span=source_ts_def.span,
+            start=source_ts_def.start,
+            end=source_ts_def.end,
+            multiplier=source_ts_def.multiplier,
+            tag=name,
+        )
 
-    def _build_df(self) -> pl.DataFrame:
-        upstream_df = self._build_from_upstream_or_error()
-        tickers: list[str] = upstream_df[cols.TICKER].to_list()
-        values: list[float | None] = []
-        for ticker in tickers:
-            try:
-                series = self.get_time_series(ticker, self._ts_def)
-            except TimeSeriesNotAvailableError:
-                values.append(None)
+    def _build_kb(self) -> KnowledgeBase:
+        kb = self._build_from_upstream_or_error()
+        kb.alias_map[self._name] = self._derived_ts_def
+        for stock in kb.stock_data.values():
+            series = stock.numeric_time_series.get(self._ts_alias)
+            if series is None:
+                stock.numeric_time_series[self._name] = []
+                stock.numeric_metrics[self._name] = None
                 continue
             sma_series = simple_moving_average(series, self._period)
-            values.append(sma_series[-1] if sma_series else None)
+            stock.numeric_time_series[self._name] = [
+                v if v is not None else float("nan") for v in sma_series
+            ]
+            stock.numeric_metrics[self._name] = sma_series[-1] if sma_series else None
         logger.info(
-            "Computed SMA %r (period=%d) for %d tickers",
+            "SimpleMovingAverageDecorator %r (period=%d): %d ticker(s)",
             self._name,
             self._period,
-            len(tickers),
+            len(kb.stock_data),
         )
-        return upstream_df.with_columns(
-            pl.Series(name=self._name, values=values, dtype=pl.Float64)
-        )
+        return kb
 
-    def build(self) -> GT:
-        df = self._build_df()
-        return (
-            GT(df)
-            .tab_header(
-                title=f"With SMA: {self._name} (period={self._period})",
-                subtitle=f"{df.height} tickers",
-            )
-            .sub_missing(missing_text="—")
-        )
+
+# ── KnowledgeBase → DataFrame renderer ───────────────────────────────
+
+
+def _kb_to_df(kb: KnowledgeBase) -> pl.DataFrame:
+    """Serialise a :class:`KnowledgeBase` for display.
+
+    One row per ticker.  Columns: every populated categorical field,
+    every key in ``numeric_metrics``, plus a ``<alias>_latest`` column
+    for every key in ``numeric_time_series`` (a series can't fit in a
+    cell, so we surface the latest value).
+    """
+    if not kb.stock_data:
+        return pl.DataFrame({cols.TICKER: []})
+
+    stocks = list(kb.stock_data.values())
+
+    # Categorical fields — include only those populated for at least one
+    # stock (keeps the table from being mostly None columns).
+    categorical_attrs: list[tuple[str, str]] = [
+        (f.name, _categorical_display_label(f.name))
+        for f in dataclass_fields(Stock)
+        if f.name not in {"ticker", "numeric_metrics", "numeric_time_series"}
+    ]
+    populated_cat = [
+        (attr, label)
+        for attr, label in categorical_attrs
+        if any(getattr(s, attr) is not None for s in stocks)
+    ]
+
+    metric_aliases: list[str] = []
+    seen_metrics: set[str] = set()
+    for s in stocks:
+        for k in s.numeric_metrics:
+            if k not in seen_metrics:
+                seen_metrics.add(k)
+                metric_aliases.append(k)
+
+    series_aliases: list[str] = []
+    seen_series: set[str] = set()
+    for s in stocks:
+        for k in s.numeric_time_series:
+            if k not in seen_series:
+                seen_series.add(k)
+                series_aliases.append(k)
+
+    rows: list[dict[str, Any]] = []
+    for s in stocks:
+        row: dict[str, Any] = {cols.TICKER: s.ticker}
+        for attr, label in populated_cat:
+            row[label] = getattr(s, attr)
+        for alias in metric_aliases:
+            row[alias] = s.numeric_metrics.get(alias)
+        for alias in series_aliases:
+            series = s.numeric_time_series.get(alias)
+            if not series:
+                row[f"{alias}_latest"] = None
+            else:
+                last = series[-1]
+                row[f"{alias}_latest"] = None if _is_nan(last) else last
+        rows.append(row)
+
+    # Explicit schema — categorical fields are Utf8, all numeric columns
+    # are Float64.  Without this, polars infers from row 0 and chokes
+    # when later rows differ.
+    schema: dict[str, type[pl.DataType]] = {cols.TICKER: pl.Utf8}
+    for _attr, label in populated_cat:
+        schema[label] = pl.Utf8
+    for alias in metric_aliases:
+        schema[alias] = pl.Float64
+    for alias in series_aliases:
+        schema[f"{alias}_latest"] = pl.Float64
+
+    return pl.DataFrame(rows, schema=schema)
+
+
+def _is_nan(v: float | None) -> bool:
+    if v is None:
+        return True
+    try:
+        return bool(np.isnan(v))
+    except TypeError, ValueError:
+        return False
+
+
+# Categorical attribute name → DataFrame column label.  Mirrors
+# _STOCK_CATEGORICAL_FIELDS in reverse but is computed once.
+_CATEGORICAL_DISPLAY_LABELS = {
+    attr: col for col, attr in _STOCK_CATEGORICAL_FIELDS.items()
+}
+
+
+def _categorical_display_label(attr: str) -> str:
+    return _CATEGORICAL_DISPLAY_LABELS.get(attr, attr)

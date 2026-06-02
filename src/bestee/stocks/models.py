@@ -1,7 +1,7 @@
 """Data models for bestee financial metrics."""
 
 import datetime as dt
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum, StrEnum
 
 
@@ -244,3 +244,66 @@ class CommandHeader(StrEnum):
     STOCHASTIC_OSCILLATOR = "STOCHASTIC_OSCILLATOR"
     RSI = "RSI"
     SMA = "SMA"
+
+
+type AliasMap = dict[str, FinancialMetric | TimeSeriesDef]
+
+
+@dataclass
+class Stock:
+    """Per-ticker container that decorators iteratively populate.
+
+    ``numeric_metrics`` and ``numeric_time_series`` are keyed by the DSL
+    alias names (``"latest_revenue"``, ``"ts1"``, ``"rsi14"``); the
+    concrete :class:`FinancialMetric` / :class:`TimeSeriesDef` for each
+    alias lives in :class:`KnowledgeBase.alias_map`.
+    """
+
+    ticker: str
+    # Categorical / textual fields sourced from the ticker-details endpoint.
+    # Populated by AssetScopeDecorator; downstream filters
+    # (SameSICategoryDecorator) read from here.
+    name: str | None = None
+    description: str | None = None
+    type: str | None = None
+    market: str | None = None
+    locale: str | None = None
+    primary_exchange: str | None = None
+    currency_name: str | None = None
+    cik: str | None = None
+    composite_figi: str | None = None
+    share_class_figi: str | None = None
+    sic_code: str | None = None
+    sic_description: str | None = None
+    market_cap: str | None = None
+    share_class_shares_outstanding: str | None = None
+    weighted_shares_outstanding: str | None = None
+    total_employees: str | None = None
+    list_date: str | None = None
+    homepage_url: str | None = None
+    phone_number: str | None = None
+    ticker_root: str | None = None
+    # Numeric payloads populated incrementally by the decorator chain.
+    numeric_metrics: dict[str, float | None] = field(default_factory=dict)
+    numeric_time_series: dict[str, list[float]] = field(default_factory=dict)
+
+
+@dataclass
+class PairWiseData:
+    a: str
+    b: str
+    numeric_metrics: dict[str, float | None] = field(default_factory=dict)
+
+
+@dataclass
+class KnowledgeBase:
+    """The shared state every decorator in the chain mutates.
+
+    Decorators populate ``stock_data`` (per-ticker payloads), register
+    DSL alias bindings in ``alias_map``, and may produce ticker-pair
+    aggregates in ``pairwise_data`` (no producers exist yet).
+    """
+
+    alias_map: AliasMap = field(default_factory=dict)
+    stock_data: dict[str, Stock] = field(default_factory=dict)
+    pairwise_data: dict[str, PairWiseData] = field(default_factory=dict)

@@ -48,12 +48,12 @@ from bestee.stocks.decorators import (
     ComputedMetricDecorator,
     FinancialMetricCacheDecorator,
     FinancialsDecorator,
+    KnowledgeBaseDecorator,
     PickTickersDecorator,
     RelativeStrengthIndexDecorator,
     SameSICategoryDecorator,
     SimpleMovingAverageDecorator,
     StochasticOscillatorDecorator,
-    TableDecorator,
     TimeSeriesCacheDecorator,
     TimeSeriesDerivedDecorator,
     TimeSeriesMetricDecorator,
@@ -68,7 +68,7 @@ from bestee.stocks.models import (
 )
 
 type Command = Sequence[str]
-type DecoratorBuilder = Callable[[Sequence[Command]], Sequence[TableDecorator]]
+type DecoratorBuilder = Callable[[Sequence[Command]], Sequence[KnowledgeBaseDecorator]]
 
 
 class ProcessingLevelError(Exception):
@@ -98,9 +98,9 @@ def build_subsetting_decorators(upstream: DecoratorBuilder) -> DecoratorBuilder:
     upstream is passed through unchanged.
     """
 
-    def decorator_builder(cmds: Sequence[Command]) -> Sequence[TableDecorator]:
+    def decorator_builder(cmds: Sequence[Command]) -> Sequence[KnowledgeBaseDecorator]:
         upstream_decorators = upstream(cmds)
-        filters: list[TableDecorator] = []
+        filters: list[KnowledgeBaseDecorator] = []
 
         for c in cmds:
             match c[0]:
@@ -141,7 +141,7 @@ def build_financials_decorators(upstream: DecoratorBuilder) -> DecoratorBuilder:
     are present, the upstream's decorators are returned unchanged.
     """
 
-    def decorator_builder(cmds: Sequence[Command]) -> Sequence[TableDecorator]:
+    def decorator_builder(cmds: Sequence[Command]) -> Sequence[KnowledgeBaseDecorator]:
         upstream_decorators = upstream(cmds)
         caches: list[FinancialMetricCacheDecorator] = []
         seen_names: set[str] = set()
@@ -207,8 +207,8 @@ def build_computed_metric_decorators(upstream: DecoratorBuilder) -> DecoratorBui
     earlier (by ``FINANCIAL_METRIC`` or an earlier ``COMPUTED_METRIC``).
     """
 
-    def decorator_builder(cmds: Sequence[Command]) -> Sequence[TableDecorator]:
-        current: Sequence[TableDecorator] = upstream(cmds)
+    def decorator_builder(cmds: Sequence[Command]) -> Sequence[KnowledgeBaseDecorator]:
+        current: Sequence[KnowledgeBaseDecorator] = upstream(cmds)
         for c in cmds:
             if c[0] != CommandHeader.COMPUTED_METRIC:
                 continue
@@ -236,9 +236,9 @@ def build_computed_metric_decorators(upstream: DecoratorBuilder) -> DecoratorBui
 
 def _process_time_series(
     c: Command,
-    current: Sequence[TableDecorator],
+    current: Sequence[KnowledgeBaseDecorator],
     ts_defs: dict[str, TimeSeriesDef],
-) -> tuple[Sequence[TableDecorator], dict[str, TimeSeriesDef]]:
+) -> tuple[Sequence[KnowledgeBaseDecorator], dict[str, TimeSeriesDef]]:
     """Handle a single ``TIME_SERIES`` command.
 
     Form: ``TIME_SERIES <name> <field> <start> <end> <span> <multiplier>``.
@@ -283,14 +283,14 @@ def _process_time_series(
         tag=name,
     )
     ts_defs = {**ts_defs, name: ts_def}
-    return [TimeSeriesCacheDecorator(ts_def, *current)], ts_defs
+    return [TimeSeriesCacheDecorator(name, ts_def, *current)], ts_defs
 
 
 def _process_time_series_derived(
     c: Command,
-    current: Sequence[TableDecorator],
+    current: Sequence[KnowledgeBaseDecorator],
     ts_defs: dict[str, TimeSeriesDef],
-) -> tuple[Sequence[TableDecorator], dict[str, TimeSeriesDef]]:
+) -> tuple[Sequence[KnowledgeBaseDecorator], dict[str, TimeSeriesDef]]:
     """Handle a single ``TIME_SERIES_DERIVED`` command.
 
     Form: ``TIME_SERIES_DERIVED <name> <expression>``.  *expression*
@@ -342,7 +342,7 @@ def _process_time_series_derived(
     ts_defs = {**ts_defs, derived_name: derived_ts}
     try:
         next_stage = TimeSeriesDerivedDecorator(
-            derived_ts, expression, ts_defs, *current
+            derived_name, expression, list(ts_defs), derived_ts, *current
         )
     except ValueError as err:
         raise ProcessingLevelError(str(err)) from err
@@ -351,9 +351,9 @@ def _process_time_series_derived(
 
 def _process_time_series_metric(
     c: Command,
-    current: Sequence[TableDecorator],
+    current: Sequence[KnowledgeBaseDecorator],
     ts_defs: dict[str, TimeSeriesDef],
-) -> Sequence[TableDecorator]:
+) -> Sequence[KnowledgeBaseDecorator]:
     """Handle a single ``TIME_SERIES_METRIC`` command.
 
     Form: ``TIME_SERIES_METRIC <name> <metric> <ts_name>``.
@@ -362,8 +362,7 @@ def _process_time_series_metric(
         msg = "TIME_SERIES_METRIC requires 3 arguments: <name> <metric> <ts_name>"
         raise ProcessingLevelError(msg)
     column_name, metric_name, ts_name_ref = c[1], c[2], c[3]
-    ts_def = ts_defs.get(ts_name_ref)
-    if ts_def is None:
+    if ts_name_ref not in ts_defs:
         msg = (
             f"TIME_SERIES_METRIC refers to undefined name {ts_name_ref!r}. "
             f"Defined: {sorted(ts_defs)}"
@@ -371,7 +370,7 @@ def _process_time_series_metric(
         raise ProcessingLevelError(msg)
     try:
         next_stage = TimeSeriesMetricDecorator(
-            ts_def, column_name, metric_name, *current
+            column_name, ts_name_ref, metric_name, *current
         )
     except ValueError as err:
         # Surface unknown-metric errors at pipeline-build time with
@@ -380,16 +379,35 @@ def _process_time_series_metric(
     return [next_stage]
 
 
+def _derive_ts_def(source: TimeSeriesDef, tag: str) -> TimeSeriesDef:
+    """Clone *source*'s shape onto a fresh ``TimeSeriesDef`` with *tag*.
+
+    Indicator outputs (RSI, SMA, %K, %D) and derived series share the
+    bar grid of their source close series, but need a distinct identity
+    so the registry can disambiguate them.  ``tag`` becomes the DSL
+    alias name (e.g. ``"rsi14"``).
+    """
+    return TimeSeriesDef(
+        name=source.name,
+        span=source.span,
+        start=source.start,
+        end=source.end,
+        multiplier=source.multiplier,
+        tag=tag,
+    )
+
+
 def _process_stochastic_oscillator(
     c: Command,
-    current: Sequence[TableDecorator],
+    current: Sequence[KnowledgeBaseDecorator],
     ts_defs: dict[str, TimeSeriesDef],
-) -> Sequence[TableDecorator]:
+) -> tuple[Sequence[KnowledgeBaseDecorator], dict[str, TimeSeriesDef]]:
     """Handle a single ``STOCHASTIC_OSCILLATOR`` command.
 
     Form: ``STOCHASTIC_OSCILLATOR <name> <ts_high> <ts_low> <ts_close>
-    <k_period> <d_period>``.  Produces two columns ``<name>_k`` and
-    ``<name>_d`` with each ticker's latest %K / %D.
+    <k_period> <d_period>``.  Produces two aliases ``<name>_k`` and
+    ``<name>_d``, each carrying a full series (and a latest scalar)
+    downstream stages can reference like any other ``TIME_SERIES``.
     """
     if len(c) != 7:
         msg = (
@@ -399,17 +417,15 @@ def _process_stochastic_oscillator(
         raise ProcessingLevelError(msg)
     name = c[1]
     ts_refs = {"<ts_high>": c[2], "<ts_low>": c[3], "<ts_close>": c[4]}
-    resolved: list[TimeSeriesDef] = []
     for role, ref in ts_refs.items():
-        ts_def = ts_defs.get(ref)
-        if ts_def is None:
+        if ref not in ts_defs:
             msg = (
                 f"STOCHASTIC_OSCILLATOR {role} refers to undefined name "
                 f"{ref!r}. Defined: {sorted(ts_defs)}"
             )
             raise ProcessingLevelError(msg)
-        resolved.append(ts_def)
-    high_def, low_def, close_def = resolved
+    high_alias, low_alias, close_alias = c[2], c[3], c[4]
+    close_def = ts_defs[close_alias]
     try:
         k_period = int(c[5])
         d_period = int(c[6])
@@ -419,29 +435,54 @@ def _process_stochastic_oscillator(
             f"integers, got k={c[5]!r} d={c[6]!r}"
         )
         raise ProcessingLevelError(msg) from err
+    k_alias, d_alias = f"{name}_k", f"{name}_d"
+    for produced in (k_alias, d_alias):
+        if produced in ts_defs:
+            msg = (
+                f"STOCHASTIC_OSCILLATOR would produce alias {produced!r}, "
+                "which is already defined"
+            )
+            raise ProcessingLevelError(msg)
     try:
         decorator = StochasticOscillatorDecorator(
-            name, high_def, low_def, close_def, k_period, d_period, *current
+            name,
+            high_alias,
+            low_alias,
+            close_alias,
+            k_period,
+            d_period,
+            close_def,
+            *current,
         )
     except ValueError as err:
         raise ProcessingLevelError(str(err)) from err
-    return [decorator]
+    ts_defs = {
+        **ts_defs,
+        k_alias: _derive_ts_def(close_def, k_alias),
+        d_alias: _derive_ts_def(close_def, d_alias),
+    }
+    return [decorator], ts_defs
 
 
 def _process_rsi(
     c: Command,
-    current: Sequence[TableDecorator],
+    current: Sequence[KnowledgeBaseDecorator],
     ts_defs: dict[str, TimeSeriesDef],
-) -> Sequence[TableDecorator]:
+) -> tuple[Sequence[KnowledgeBaseDecorator], dict[str, TimeSeriesDef]]:
     """Handle a single ``RSI`` command.
 
-    Form: ``RSI <name> <ts_close> <period>``.  Produces one Float64
-    column ``<name>`` holding each ticker's latest Wilder-smoothed RSI.
+    Form: ``RSI <name> <ts_close> <period>``.  Produces alias ``<name>``
+    holding a full Wilder-smoothed RSI series (and a latest scalar);
+    registered in ``ts_defs`` so downstream ``TIME_SERIES_DERIVED`` /
+    indicators can chain off it.
     """
     if len(c) != 4:
         msg = "RSI requires 3 arguments: <name> <ts_close> <period>"
         raise ProcessingLevelError(msg)
     name, ts_close_ref, period_token = c[1], c[2], c[3]
+    if name in ts_defs:
+        msg = f"RSI alias {name!r} is already defined"
+        raise ProcessingLevelError(msg)
     ts_close_def = ts_defs.get(ts_close_ref)
     if ts_close_def is None:
         msg = (
@@ -455,26 +496,33 @@ def _process_rsi(
         msg = f"RSI period must be an integer, got {period_token!r}"
         raise ProcessingLevelError(msg) from err
     try:
-        decorator = RelativeStrengthIndexDecorator(name, ts_close_def, period, *current)
+        decorator = RelativeStrengthIndexDecorator(
+            name, ts_close_ref, period, ts_close_def, *current
+        )
     except ValueError as err:
         raise ProcessingLevelError(str(err)) from err
-    return [decorator]
+    ts_defs = {**ts_defs, name: _derive_ts_def(ts_close_def, name)}
+    return [decorator], ts_defs
 
 
 def _process_sma(
     c: Command,
-    current: Sequence[TableDecorator],
+    current: Sequence[KnowledgeBaseDecorator],
     ts_defs: dict[str, TimeSeriesDef],
-) -> Sequence[TableDecorator]:
+) -> tuple[Sequence[KnowledgeBaseDecorator], dict[str, TimeSeriesDef]]:
     """Handle a single ``SMA`` command.
 
-    Form: ``SMA <name> <ts> <period>``.  Produces one Float64 column
-    ``<name>`` holding each ticker's latest simple moving average.
+    Form: ``SMA <name> <ts> <period>``.  Produces alias ``<name>``
+    holding a full SMA series (and a latest scalar); registered in
+    ``ts_defs`` so downstream stages can chain off it.
     """
     if len(c) != 4:
         msg = "SMA requires 3 arguments: <name> <ts> <period>"
         raise ProcessingLevelError(msg)
     name, ts_ref, period_token = c[1], c[2], c[3]
+    if name in ts_defs:
+        msg = f"SMA alias {name!r} is already defined"
+        raise ProcessingLevelError(msg)
     ts_def = ts_defs.get(ts_ref)
     if ts_def is None:
         msg = (
@@ -487,10 +535,11 @@ def _process_sma(
         msg = f"SMA period must be an integer, got {period_token!r}"
         raise ProcessingLevelError(msg) from err
     try:
-        decorator = SimpleMovingAverageDecorator(name, ts_def, period, *current)
+        decorator = SimpleMovingAverageDecorator(name, ts_ref, period, ts_def, *current)
     except ValueError as err:
         raise ProcessingLevelError(str(err)) from err
-    return [decorator]
+    ts_defs = {**ts_defs, name: _derive_ts_def(ts_def, name)}
+    return [decorator], ts_defs
 
 
 def build_time_series_decorators(upstream: DecoratorBuilder) -> DecoratorBuilder:
@@ -499,19 +548,22 @@ def build_time_series_decorators(upstream: DecoratorBuilder) -> DecoratorBuilder
     handling.
 
     All commands share a per-pass ``ts_defs`` registry.  Commands run
-    in two sub-passes so DERIVED / METRIC / indicator lines can sit
-    anywhere in the input — even before their referenced
-    ``TIME_SERIES``:
+    in two sub-passes:
 
-    1. All ``TIME_SERIES`` declarations first (in input order).
+    1. All raw ``TIME_SERIES`` declarations first (in input order) —
+       so DERIVED / METRIC / indicator lines may sit anywhere in the
+       input, including before their referenced ``TIME_SERIES``.
     2. Then ``TIME_SERIES_DERIVED``, ``TIME_SERIES_METRIC``,
        ``STOCHASTIC_OSCILLATOR``, ``RSI``, and ``SMA`` lines, in input
-       order.  DERIVED-on-DERIVED still requires the source to appear
-       earlier in input order, since the registry grows as we go.
+       order.  Indicator and DERIVED stages register their output
+       aliases in ``ts_defs`` as they're processed, so a later
+       ``TIME_SERIES_DERIVED smoothed sma20 - rsi14`` works as long as
+       the operands appear earlier in input order.  Cycles aren't
+       possible — the registry only ever grows.
     """
 
-    def decorator_builder(cmds: Sequence[Command]) -> Sequence[TableDecorator]:
-        current: Sequence[TableDecorator] = upstream(cmds)
+    def decorator_builder(cmds: Sequence[Command]) -> Sequence[KnowledgeBaseDecorator]:
+        current: Sequence[KnowledgeBaseDecorator] = upstream(cmds)
         ts_defs: dict[str, TimeSeriesDef] = {}
 
         # Pass 1: register every TIME_SERIES declaration and chain its
@@ -521,7 +573,12 @@ def build_time_series_decorators(upstream: DecoratorBuilder) -> DecoratorBuilder
                 current, ts_defs = _process_time_series(c, current, ts_defs)
 
         # Pass 2: build derived series, metric columns, and indicators;
-        # all may reference any name registered above.
+        # all may reference any name registered above.  Indicator
+        # commands (RSI / SMA / STOCHASTIC_OSCILLATOR) extend ts_defs
+        # with their output alias(es) so subsequent TIME_SERIES_DERIVED
+        # / TIME_SERIES_METRIC / indicator lines can chain off them —
+        # source must appear earlier in input order, since the registry
+        # grows as we go.
         for c in cmds:
             match c[0]:
                 case CommandHeader.TIME_SERIES_DERIVED:
@@ -529,11 +586,13 @@ def build_time_series_decorators(upstream: DecoratorBuilder) -> DecoratorBuilder
                 case CommandHeader.TIME_SERIES_METRIC:
                     current = _process_time_series_metric(c, current, ts_defs)
                 case CommandHeader.STOCHASTIC_OSCILLATOR:
-                    current = _process_stochastic_oscillator(c, current, ts_defs)
+                    current, ts_defs = _process_stochastic_oscillator(
+                        c, current, ts_defs
+                    )
                 case CommandHeader.RSI:
-                    current = _process_rsi(c, current, ts_defs)
+                    current, ts_defs = _process_rsi(c, current, ts_defs)
                 case CommandHeader.SMA:
-                    current = _process_sma(c, current, ts_defs)
+                    current, ts_defs = _process_sma(c, current, ts_defs)
                 case _:
                     pass
 
@@ -551,7 +610,7 @@ def build_time_series_decorators(upstream: DecoratorBuilder) -> DecoratorBuilder
 @build_subsetting_decorators
 def master_decorator_builder(
     cmds: Sequence[Command],
-) -> Sequence[TableDecorator]:
+) -> Sequence[KnowledgeBaseDecorator]:
     """Innermost builder — handles ``ASSET_SCOPE`` lines.
 
     Each ``ASSET_SCOPE`` line produces an :class:`AssetScopeDecorator`;
@@ -563,7 +622,7 @@ def master_decorator_builder(
     of the DSL on top, in order: SUBSETTING → FINANCIALS → COMPUTED →
     TIME SERIES.
     """
-    sources: list[TableDecorator] = []
+    sources: list[KnowledgeBaseDecorator] = []
     for c in cmds:
         match c[0]:
             case CommandHeader.ASSET_SCOPE:
@@ -591,7 +650,7 @@ def master_decorator_builder(
     return [AppendTablesDecorator(*sources)]
 
 
-def decorator_builder(cmds: Sequence[Command]) -> TableDecorator:
+def decorator_builder(cmds: Sequence[Command]) -> KnowledgeBaseDecorator:
     """Public entry point — build one chained decorator from *cmds*.
 
     Wraps :func:`master_decorator_builder` (which returns a single-
