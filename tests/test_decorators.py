@@ -7,7 +7,6 @@ from unittest.mock import MagicMock, patch
 
 import polars as pl
 import pytest
-from great_tables import GT
 
 import bestee.resources
 from bestee.stocks.builder import (
@@ -18,12 +17,12 @@ from bestee.stocks.builder import (
     decorator_builder,
 )
 from bestee.stocks.decorators import (
-    AppendTablesDecorator,
     AssetScopeDecorator,
     ComputedMetricDecorator,
     FinancialMetricCacheDecorator,
     FinancialsDecorator,
     KnowledgeBaseDecorator,
+    MergeDecorator,
     NoUpstreamError,
     RelativeStrengthIndexDecorator,
     SameSICategoryDecorator,
@@ -56,7 +55,7 @@ class _StubUpstream(KnowledgeBaseDecorator):
         super().__init__(None)
         self._kb = kb
 
-    def _build_kb(self) -> KnowledgeBase:
+    def build_kb(self) -> KnowledgeBase:
         return self._kb
 
 
@@ -209,12 +208,12 @@ _BASE = ["ASSET_SCOPE", "STOCKS"]
 class TestDecoratorBuilder:
     def test_single_asset_scope_command(self) -> None:
         result = decorator_builder([_BASE])
-        assert isinstance(result, AppendTablesDecorator)
+        assert isinstance(result, MergeDecorator)
         assert isinstance(_upstreams_of(result)[0], AssetScopeDecorator)
 
     def test_asset_scope_with_same_sic(self) -> None:
         result = decorator_builder([_BASE, ["SAME_SIC_CATEGORY_AS", "AAPL"]])
-        assert isinstance(result, AppendTablesDecorator)
+        assert isinstance(result, MergeDecorator)
         inner = _upstreams_of(result)[0]
         assert isinstance(inner, SameSICategoryDecorator)
         assert inner.ticker == "AAPL"
@@ -346,11 +345,11 @@ class TestDecoratorBuilder:
 class TestNoUpstreamError:
     def test_build_from_upstream_raises_when_none(self) -> None:
         class _Stage(KnowledgeBaseDecorator):
-            def _build_kb(self) -> KnowledgeBase:
+            def build_kb(self) -> KnowledgeBase:
                 return self._build_from_upstream_or_error()
 
         with pytest.raises(NoUpstreamError):
-            _Stage().build()
+            _Stage().build_kb()
 
 
 # ── SameSICategoryDecorator integration ──────────────────────────────
@@ -363,19 +362,19 @@ class TestSameSICategoryDecorator:
         kb.stock_data["MSFT"] = Stock(ticker="MSFT", sic_code="3571")
         kb.stock_data["GOOG"] = Stock(ticker="GOOG", sic_code="3571")
         kb.stock_data["F"] = Stock(ticker="F", sic_code="3711")
-        result_kb = SameSICategoryDecorator("AAPL", _StubUpstream(kb))._build_kb()
+        result_kb = SameSICategoryDecorator("AAPL", _StubUpstream(kb)).build_kb()
         assert sorted(result_kb.stock_data) == ["AAPL", "GOOG", "MSFT"]
 
     def test_missing_ticker_raises(self) -> None:
         stub = _stub_with_tickers(["AAPL"], sic_code="3571")
         with pytest.raises(ValueError, match="not found in upstream"):
-            SameSICategoryDecorator("MSFT", stub).build()
+            SameSICategoryDecorator("MSFT", stub).build_kb()
 
     def test_null_sic_raises(self) -> None:
         kb = KnowledgeBase()
         kb.stock_data["AAPL"] = Stock(ticker="AAPL", sic_code=None)
         with pytest.raises(ValueError, match="no SIC code"):
-            SameSICategoryDecorator("AAPL", _StubUpstream(kb)).build()
+            SameSICategoryDecorator("AAPL", _StubUpstream(kb)).build_kb()
 
 
 # ── ComputedMetricDecorator integration ──────────────────────────────
@@ -391,7 +390,7 @@ class TestComputedMetricBuild:
             ticker="MSFT", numeric_metrics={"ni": 200.0, "assets": 1000.0}
         )
         deco = ComputedMetricDecorator("roa", "ni / assets", _StubUpstream(kb))
-        result_kb = deco._build_kb()
+        result_kb = deco.build_kb()
         assert result_kb.stock_data["AAPL"].numeric_metrics["roa"] == pytest.approx(
             0.25
         )
@@ -408,7 +407,7 @@ class TestComputedMetricBuild:
         deco = ComputedMetricDecorator(
             "cm1", "(fm2 * 2) / (fm3 + fm4)", _StubUpstream(kb)
         )
-        result_kb = deco._build_kb()
+        result_kb = deco.build_kb()
         assert result_kb.stock_data["AAPL"].numeric_metrics["cm1"] == pytest.approx(2.0)
         assert result_kb.stock_data["MSFT"].numeric_metrics["cm1"] == pytest.approx(1.0)
 
@@ -421,7 +420,7 @@ class TestComputedMetricBuild:
             ticker="MSFT", numeric_metrics={"ni": 200.0, "assets": None}
         )
         deco = ComputedMetricDecorator("roa", "ni / assets", _StubUpstream(kb))
-        result_kb = deco._build_kb()
+        result_kb = deco.build_kb()
         assert result_kb.stock_data["AAPL"].numeric_metrics["roa"] == pytest.approx(
             0.25
         )
@@ -433,7 +432,7 @@ class TestComputedMetricBuild:
             ticker="AAPL", numeric_metrics={"ni": 100.0, "assets": 0.0}
         )
         deco = ComputedMetricDecorator("roa", "ni / assets", _StubUpstream(kb))
-        result_kb = deco._build_kb()
+        result_kb = deco.build_kb()
         assert result_kb.stock_data["AAPL"].numeric_metrics["roa"] is None
 
     def test_chained_computed_metric_reads_upstream_value(self) -> None:
@@ -441,7 +440,7 @@ class TestComputedMetricBuild:
         kb.stock_data["AAPL"] = Stock(ticker="AAPL", numeric_metrics={"roa": 0.25})
         kb.stock_data["MSFT"] = Stock(ticker="MSFT", numeric_metrics={"roa": 0.10})
         deco = ComputedMetricDecorator("doubled_roa", "roa * 2", _StubUpstream(kb))
-        result_kb = deco._build_kb()
+        result_kb = deco.build_kb()
         assert result_kb.stock_data["AAPL"].numeric_metrics[
             "doubled_roa"
         ] == pytest.approx(0.5)
@@ -453,7 +452,7 @@ class TestComputedMetricBuild:
         """An expression referencing an unknown name propagates None per stock."""
         stub = _stub_with_tickers(["AAPL"])
         deco = ComputedMetricDecorator("x", "missing * 2", stub)
-        result_kb = deco._build_kb()
+        result_kb = deco.build_kb()
         assert result_kb.stock_data["AAPL"].numeric_metrics["x"] is None
 
 
@@ -478,18 +477,18 @@ class TestFinancialsDecoratorNames:
             FinancialMetricCacheDecorator("fm_ni", ni),
             FinancialMetricCacheDecorator("fm_ta", ta),
         )
-        kb = deco._build_kb()
+        kb = deco.build_kb()
         assert kb.stock_data["AAPL"].numeric_metrics["fm_ni"] == pytest.approx(100.0)
         assert kb.stock_data["AAPL"].numeric_metrics["fm_ta"] == pytest.approx(400.0)
         assert kb.stock_data["MSFT"].numeric_metrics["fm_ni"] == pytest.approx(200.0)
-        # The alias_map records the binding.
-        assert kb.alias_map["fm_ni"] == ni
-        assert kb.alias_map["fm_ta"] == ta
+        # Each Stock's alias_map records the binding.
+        assert kb.stock_data["AAPL"].alias_map["fm_ni"] == ni
+        assert kb.stock_data["AAPL"].alias_map["fm_ta"] == ta
 
     def test_no_caches_passes_upstream_through(self) -> None:
         stub = _stub_with_tickers(["AAPL"])
         deco = FinancialsDecorator(stub)
-        kb = deco._build_kb()
+        kb = deco.build_kb()
         # No FinancialMetric requests → no API call, no new metrics.
         assert kb.stock_data["AAPL"].numeric_metrics == {}
 
@@ -606,13 +605,13 @@ def test_full_pipeline_executes_end_to_end_with_mocks() -> None:
 
     with (
         patch(
-            "bestee.stocks.decorators.AssetScopeDecorator._build_kb",
+            "bestee.stocks.decorators.AssetScopeDecorator.build_kb",
             side_effect=fake_asset_scope_kb,
         ),
         patch(_FINANCIALS_PATCH, return_value=fin_df),
         patch(_GET_TS_PATCH, side_effect=lambda t, _td: ts_series[t]),
     ):
-        kb = pipeline._build_kb()
+        kb = pipeline.build_kb()
 
     assert sorted(kb.stock_data) == ["AAPL", "MSFT"]
     aapl = kb.stock_data["AAPL"]
@@ -644,7 +643,7 @@ class TestTimeSeriesMetricDecorator:
             "RSquared",
             TimeSeriesCacheDecorator("ts1", ts, stub),
         )
-        kb = chain._build_kb()
+        kb = chain.build_kb()
         assert kb.stock_data["AAPL"].numeric_metrics["tsm1"] == pytest.approx(1.0)
         assert kb.stock_data["MSFT"].numeric_metrics["tsm1"] == pytest.approx(1.0)
 
@@ -655,9 +654,9 @@ class TestTimeSeriesMetricDecorator:
         ts = _ts_def(tag="ts1")
         cache = TimeSeriesCacheDecorator("ts1", ts, stub)
         # Build the cache once — fetch happens here.
-        cache._build_kb()
-        TimeSeriesMetricDecorator("a", "ts1", "RSquared", cache)._build_kb()
-        TimeSeriesMetricDecorator("b", "ts1", "RSquared", cache)._build_kb()
+        cache.build_kb()
+        TimeSeriesMetricDecorator("a", "ts1", "RSquared", cache).build_kb()
+        TimeSeriesMetricDecorator("b", "ts1", "RSquared", cache).build_kb()
         # Cache decorator fetches once per ticker per _build_kb call; the
         # metric decorators read pre-stored series off the stock, so no
         # extra fetches happen.  Total: 3 (one per _build_kb above).
@@ -667,22 +666,8 @@ class TestTimeSeriesMetricDecorator:
         """Without an upstream cache, the source alias isn't in the stock — None."""
         stub = _stub_with_tickers(["AAPL"])
         deco = TimeSeriesMetricDecorator("tsm1", "ts1", "RSquared", stub)
-        kb = deco._build_kb()
+        kb = deco.build_kb()
         assert kb.stock_data["AAPL"].numeric_metrics["tsm1"] is None
-
-    @patch(_GET_TS_PATCH)
-    def test_build_returns_gt(self, mock_get: MagicMock) -> None:
-        mock_get.return_value = [1.0, 2.0, 3.0]
-        stub = _stub_with_tickers(["AAPL"])
-        ts = _ts_def(tag="ts1")
-        deco = TimeSeriesMetricDecorator(
-            "tsm1",
-            "ts1",
-            "RSquared",
-            TimeSeriesCacheDecorator("ts1", ts, stub),
-        )
-        gt = deco.build()
-        assert isinstance(gt, GT)
 
     def test_unknown_metric_raises(self) -> None:
         with pytest.raises(ValueError, match="Unknown time-series metric"):
@@ -745,7 +730,7 @@ class TestRegisterTimeSeriesMetric:
                     "ts1",
                     "LastValue",
                     TimeSeriesCacheDecorator("ts1", ts, stub),
-                )._build_kb()
+                ).build_kb()
             assert kb.stock_data["AAPL"].numeric_metrics["last"] == 30.0
             assert kb.stock_data["MSFT"].numeric_metrics["last"] == 200.0
         finally:
@@ -850,7 +835,7 @@ class TestTimeSeriesDerivedDecorator:
         derived = TimeSeriesDerivedDecorator(
             "ts3", "ts2-ts1", ["ts1", "ts2"], ts3, cache2
         )
-        kb = derived._build_kb()
+        kb = derived.build_kb()
         assert kb.stock_data["AAPL"].numeric_time_series["ts3"] == [
             pytest.approx(3.0),
             pytest.approx(3.0),
@@ -953,7 +938,7 @@ class TestTimeSeriesDerivedDsl:
                 "MSFT": {ts1: [100.0, 110.0], ts2: [105.0, 115.0]},
             }
             mock_get.side_effect = lambda ticker, td: per_ticker[ticker][td]
-            kb = decorator._build_kb()
+            kb = decorator.build_kb()
             # last = (ts2 - ts1)[-1]: AAPL → 20-12=8;  MSFT → 115-110=5.
             assert kb.stock_data["AAPL"].numeric_metrics["last"] == pytest.approx(8.0)
             assert kb.stock_data["MSFT"].numeric_metrics["last"] == pytest.approx(5.0)
@@ -1072,7 +1057,7 @@ class TestStochasticOscillatorDecorator:
                     return [10.0, 11.0, 12.0, 13.0, 14.0]
 
         with patch(_GET_TS_PATCH, side_effect=fake):
-            kb = chain._build_kb()
+            kb = chain.build_kb()
 
         stock = kb.stock_data["AAPL"]
         assert stock.numeric_metrics["stoch_k"] == pytest.approx(100.0)
@@ -1095,7 +1080,7 @@ class TestStochasticOscillatorDecorator:
         chain = StochasticOscillatorDecorator(
             "stoch", "ts_h", "ts_l", "ts_c", 14, 3, ts_close, stub
         )
-        kb = chain._build_kb()
+        kb = chain.build_kb()
         assert kb.stock_data["AAPL"].numeric_metrics["stoch_k"] is None
         assert kb.stock_data["AAPL"].numeric_metrics["stoch_d"] is None
 
@@ -1237,7 +1222,7 @@ class TestRsiDecorator:
         cache_c = TimeSeriesCacheDecorator("ts_c", ts_close, stub)
         chain = RelativeStrengthIndexDecorator("rsi", "ts_c", 3, ts_close, cache_c)
         with patch(_GET_TS_PATCH, return_value=[10.0, 11.0, 12.0, 13.0, 14.0, 15.0]):
-            kb = chain._build_kb()
+            kb = chain.build_kb()
         stock = kb.stock_data["AAPL"]
         assert stock.numeric_metrics["rsi"] == pytest.approx(100.0)
         assert len(stock.numeric_time_series["rsi"]) == 6
@@ -1251,7 +1236,7 @@ class TestRsiDecorator:
         stub = _stub_with_tickers(["AAPL"])
         ts_close = _ts_def(tag="ts_c")
         chain = RelativeStrengthIndexDecorator("rsi", "ts_c", 14, ts_close, stub)
-        kb = chain._build_kb()
+        kb = chain.build_kb()
         assert kb.stock_data["AAPL"].numeric_metrics["rsi"] is None
 
     def test_flat_series_yields_none(self) -> None:
@@ -1260,7 +1245,7 @@ class TestRsiDecorator:
         cache_c = TimeSeriesCacheDecorator("ts_c", ts_close, stub)
         chain = RelativeStrengthIndexDecorator("rsi", "ts_c", 3, ts_close, cache_c)
         with patch(_GET_TS_PATCH, return_value=[5.0] * 10):
-            kb = chain._build_kb()
+            kb = chain.build_kb()
         assert kb.stock_data["AAPL"].numeric_metrics["rsi"] is None
 
 
@@ -1387,7 +1372,7 @@ class TestSmaDecorator:
         cache_c = TimeSeriesCacheDecorator("ts_c", ts_close, stub)
         chain = SimpleMovingAverageDecorator("sma3", "ts_c", 3, ts_close, cache_c)
         with patch(_GET_TS_PATCH, return_value=[1.0, 2.0, 3.0, 4.0, 5.0]):
-            kb = chain._build_kb()
+            kb = chain.build_kb()
         stock = kb.stock_data["AAPL"]
         # Latest 3-bar SMA over [1,2,3,4,5] = (3+4+5)/3 = 4.0.
         assert stock.numeric_metrics["sma3"] == pytest.approx(4.0)
@@ -1402,7 +1387,7 @@ class TestSmaDecorator:
         stub = _stub_with_tickers(["AAPL"])
         ts_close = _ts_def(tag="ts_c")
         chain = SimpleMovingAverageDecorator("sma", "ts_c", 20, ts_close, stub)
-        kb = chain._build_kb()
+        kb = chain.build_kb()
         assert kb.stock_data["AAPL"].numeric_metrics["sma"] is None
 
     def test_short_series_yields_none(self) -> None:
@@ -1411,7 +1396,7 @@ class TestSmaDecorator:
         cache_c = TimeSeriesCacheDecorator("ts_c", ts_close, stub)
         chain = SimpleMovingAverageDecorator("sma", "ts_c", 10, ts_close, cache_c)
         with patch(_GET_TS_PATCH, return_value=[1.0, 2.0, 3.0]):
-            kb = chain._build_kb()
+            kb = chain.build_kb()
         assert kb.stock_data["AAPL"].numeric_metrics["sma"] is None
 
 
@@ -1612,7 +1597,7 @@ class TestIndicatorAliasChaining:
             ["SMA", "smoothed_rsi", "rsi", "2"], current, ts_defs
         )
         [head] = current
-        kb = head._build_kb()
+        kb = head.build_kb()
         stock = kb.stock_data["AAPL"]
         assert stock.numeric_metrics["rsi"] == pytest.approx(100.0)
         assert stock.numeric_metrics["smoothed_rsi"] == pytest.approx(100.0)

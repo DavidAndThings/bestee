@@ -35,11 +35,14 @@ def main() -> int:
             )
             commands = [line.split() for line in text.splitlines() if line.strip()]
             pipeline = decorator_builder(commands)
-            gt = pipeline.build()
-            # Force GT to materialize so any deferred work runs.
-            html_len = len(gt.as_raw_html())
+            kb = pipeline.build_kb()
             elapsed = time.monotonic() - t0
-            log.info("PASS %s in %.1fs (html=%d bytes)", fname, elapsed, html_len)
+            log.info(
+                "PASS %s in %.1fs (%d stock(s))",
+                fname,
+                elapsed,
+                len(kb.stock_data),
+            )
             results.append((fname, "PASS", elapsed))
         except Exception as e:
             elapsed = time.monotonic() - t0

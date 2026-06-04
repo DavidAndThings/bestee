@@ -1,6 +1,7 @@
 """Data models for bestee financial metrics."""
 
 import datetime as dt
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from enum import Enum, StrEnum
 
@@ -246,7 +247,8 @@ class CommandHeader(StrEnum):
     SMA = "SMA"
 
 
-type AliasMap = dict[str, FinancialMetric | TimeSeriesDef]
+type AliasDescription = FinancialMetric | TimeSeriesDef
+type AliasMap = dict[str, AliasDescription]
 
 
 @dataclass
@@ -284,8 +286,42 @@ class Stock:
     phone_number: str | None = None
     ticker_root: str | None = None
     # Numeric payloads populated incrementally by the decorator chain.
+    alias_map: AliasMap = field(default_factory=dict)
     numeric_metrics: dict[str, float | None] = field(default_factory=dict)
     numeric_time_series: dict[str, list[float]] = field(default_factory=dict)
+
+    def show_all_aliases(self) -> Sequence[str]:
+        return list(self.alias_map.keys())
+
+    def set_numeric_metric(
+        self, alias: str, description: AliasDescription, value: float | None
+    ) -> None:
+        self.alias_map[alias] = description
+        self.numeric_metrics[alias] = value
+
+    def set_numeric_time_series(
+        self, alias: str, description: AliasDescription, values: list[float]
+    ) -> None:
+        self.alias_map[alias] = description
+        self.numeric_time_series[alias] = values
+
+    def get_alias_description(self, alias: str) -> AliasDescription:
+        description = self.alias_map.get(alias)
+        if description is None:
+            raise ValueError(f"Alias '{alias}' not found")
+        return description
+
+    def get_numeric_metric_value(self, alias: str) -> float:
+        value = self.numeric_metrics.get(alias)
+        if value is None:
+            raise ValueError(f"Alias '{alias}' not found")
+        return value
+
+    def get_time_series_value(self, alias: str) -> list[float]:
+        value = self.numeric_time_series.get(alias)
+        if value is None:
+            raise ValueError(f"Alias '{alias}' not found")
+        return value
 
 
 @dataclass
@@ -304,6 +340,17 @@ class KnowledgeBase:
     aggregates in ``pairwise_data`` (no producers exist yet).
     """
 
-    alias_map: AliasMap = field(default_factory=dict)
     stock_data: dict[str, Stock] = field(default_factory=dict)
     pairwise_data: dict[str, PairWiseData] = field(default_factory=dict)
+
+    def merge_with(self, other: KnowledgeBase) -> None:
+        for t, s in other.stock_data.items():
+            self.stock_data[t] = s
+        for t, pd in other.pairwise_data.items():
+            self.pairwise_data[t] = pd
+
+    def add_stock(self, stock: Stock) -> None:
+        self.stock_data[stock.ticker] = stock
+
+    def num_of_stocks(self) -> int:
+        return len(self.stock_data)

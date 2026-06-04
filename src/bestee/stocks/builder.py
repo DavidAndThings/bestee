@@ -43,12 +43,12 @@ import ast
 from collections.abc import Callable, Sequence
 
 from bestee.stocks.decorators import (
-    AppendTablesDecorator,
     AssetScopeDecorator,
     ComputedMetricDecorator,
     FinancialMetricCacheDecorator,
     FinancialsDecorator,
     KnowledgeBaseDecorator,
+    MergeDecorator,
     PickTickersDecorator,
     RelativeStrengthIndexDecorator,
     SameSICategoryDecorator,
@@ -121,7 +121,7 @@ def build_subsetting_decorators(upstream: DecoratorBuilder) -> DecoratorBuilder:
 
         if not filters:
             return upstream_decorators
-        return [AppendTablesDecorator(*filters)]
+        return [MergeDecorator(*filters)]
 
     return decorator_builder
 
@@ -614,12 +614,12 @@ def master_decorator_builder(
     """Innermost builder — handles ``ASSET_SCOPE`` lines.
 
     Each ``ASSET_SCOPE`` line produces an :class:`AssetScopeDecorator`;
-    multiple are unioned via :class:`AppendTablesDecorator`.  At least
-    one ``ASSET_SCOPE`` is required — every other phase chains on top
-    of this base table.
+    multiple are unioned via :class:`MergeDecorator`.  At least one
+    ``ASSET_SCOPE`` is required — every other phase chains on top of
+    this base.
 
-    The ``@build_*`` wrappers stacked on this function add the rest
-    of the DSL on top, in order: SUBSETTING → FINANCIALS → COMPUTED →
+    The ``@build_*`` wrappers stacked on this function add the rest of
+    the DSL on top, in order: SUBSETTING → FINANCIALS → COMPUTED →
     TIME SERIES.
     """
     sources: list[KnowledgeBaseDecorator] = []
@@ -647,7 +647,9 @@ def master_decorator_builder(
             "downstream command."
         )
         raise ProcessingLevelError(msg)
-    return [AppendTablesDecorator(*sources)]
+    # Always wrap in a MergeDecorator so the downstream invariant ("one
+    # chain head") holds whether the user declared one ASSET_SCOPE or many.
+    return [MergeDecorator(*sources)]
 
 
 def decorator_builder(cmds: Sequence[Command]) -> KnowledgeBaseDecorator:
