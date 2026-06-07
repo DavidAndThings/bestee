@@ -6,8 +6,7 @@ import json
 from collections.abc import Mapping
 from pathlib import Path
 
-# Default maximum size of a single JSON file before records spill into a new one.
-MAX_FILE_BYTES = 64 * 1024
+from bestee_chat.config import MAX_FILE_BYTES
 
 
 def store_mapping(

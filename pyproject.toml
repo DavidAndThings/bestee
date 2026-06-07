@@ -17,6 +17,7 @@ dependencies = [
 [project.scripts]
 bestee-chat = "bestee_chat.main:main"
 bestee-chat-download = "bestee_chat.embeddings:download"
+bestee-chat-wiki = "bestee_chat.wiki.cli:main"
 
 [build-system]
 requires = ["uv_build>=0.11.19,<0.12.0"]
