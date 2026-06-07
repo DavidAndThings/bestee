@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
@@ -71,3 +72,41 @@ class Exchange:
 
     def __str__(self):
         return f"User: {self.user_utterance}\nBot: {self.bot_utterance}"
+
+
+class Knowledge(ABC):
+    def __init__(self, encoder: Encoder | None = None) -> None:
+        self._encoder = encoder
+
+    @abstractmethod
+    def generate_exchanges(
+        self,
+    ) -> set[Exchange]:
+        raise NotImplementedError
+
+
+class Brain:
+    def __init__(self) -> None:
+        self._knowledge_base: set[Knowledge] = set()
+
+    def add_knowledge(self, knowledge: Knowledge) -> None:
+        self._knowledge_base.add(knowledge)
+
+    def pick_highest_ranked_exchange(
+        self, query: Sequence[str]
+    ) -> tuple[Exchange, float]:
+
+        highest_ranked_exchange = None
+        highest_ranked_score = 0.0
+
+        for knowledge in self._knowledge_base:
+            for exchange in knowledge.generate_exchanges():
+                score = exchange.similarity(query)
+                if score > highest_ranked_score:
+                    highest_ranked_score = score
+                    highest_ranked_exchange = exchange
+
+        if highest_ranked_exchange is None:
+            raise ValueError("No exchanges found")
+
+        return highest_ranked_exchange, highest_ranked_score

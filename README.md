@@ -50,6 +50,24 @@ On more capable hardware, switch to a larger, higher-quality model:
 BESTEE_EMBEDDING_MODEL=sentence-transformers/all-mpnet-base-v2 uv run bestee-chat
 ```
 
+## Wikipedia infobox scraping
+
+`scrape_infobox` fetches a Wikipedia person page and returns its infobox as a
+plain, JSON-serializable dict:
+
+```python
+import json
+
+from bestee_chat.wikipedia import scrape_infobox
+
+data = scrape_infobox("https://en.wikipedia.org/wiki/Ada_Lovelace")
+print(json.dumps(data, indent=2))
+```
+
+The keys are the infobox row labels (plus a `"name"` key from the title), with
+citations and hidden markup stripped out. Returns an empty dict if the page has
+no infobox.
+
 ## Develop
 
 ```sh

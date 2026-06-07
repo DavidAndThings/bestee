@@ -8,6 +8,9 @@ authors = [
 ]
 requires-python = ">=3.14"
 dependencies = [
+    "beautifulsoup4>=4.15.0",
+    "dotenv>=0.9.9",
+    "httpx>=0.28.1",
     "sentence-transformers>=5.5.1",
 ]
 
