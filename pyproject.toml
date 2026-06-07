@@ -1,0 +1,41 @@
+[project]
+name = "bestee-chat"
+version = "0.1.0"
+description = "A small conversational chatbot."
+readme = "README.md"
+authors = [
+    { email = "davidandthings@hey.com" }
+]
+requires-python = ">=3.14"
+dependencies = [
+    "sentence-transformers>=5.5.1",
+]
+
+[project.scripts]
+bestee-chat = "bestee_chat.main:main"
+bestee-chat-download = "bestee_chat.embeddings:download"
+
+[build-system]
+requires = ["uv_build>=0.11.19,<0.12.0"]
+build-backend = "uv_build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+src = ["src", "tests"]
+line-length = 88
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP"]
+
+[tool.ty.rules]
+possibly-unresolved-reference = "warn"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.11",
+    "ty>=0.0.1",
+    "pre-commit>=4.0",
+]
