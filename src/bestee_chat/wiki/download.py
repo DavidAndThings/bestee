@@ -11,12 +11,12 @@ from __future__ import annotations
 import hashlib
 import logging
 import re
-from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 
 import httpx
 
+from bestee_chat.wiki._util import ProgressCallback
 from bestee_chat.wiki.cache import Manifest, get_layout
 from bestee_chat.wiki.sources import WikiSource
 
@@ -25,8 +25,6 @@ logger = logging.getLogger(__name__)
 _USER_AGENT = "bestee-chat/0.1 (https://github.com/bestee-chat) wiki-dump"
 _TIMEOUT = httpx.Timeout(30.0, read=120.0)
 _CHUNK = 1 << 20  # 1 MiB
-
-ProgressCallback = Callable[[int, int | None], None]
 
 
 def parse_sha1sums(text: str, filename: str) -> str | None:

@@ -8,12 +8,12 @@ knows the full build sequence, keeping :mod:`download`, :mod:`parse`,
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
 from bestee_chat.embeddings import Encoder
+from bestee_chat.wiki._util import ProgressCallback, optional_encoder
 from bestee_chat.wiki.cache import Manifest, get_layout
 from bestee_chat.wiki.download import download_dump
 from bestee_chat.wiki.hardware import probe_hardware
@@ -24,8 +24,6 @@ from bestee_chat.wiki.sources import WikiSource
 from bestee_chat.wiki.vectors import build_vectors
 
 logger = logging.getLogger(__name__)
-
-ProgressCallback = Callable[[int, int], None]
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,7 +70,11 @@ def build_index(
 
     vectors_built = False
     if resolved.semantic:
-        enc = encoder or _default_encoder()
+        enc = encoder or optional_encoder()
+        if enc is None:
+            raise RuntimeError(
+                "semantic profile requires torch, which is not available"
+            )
         build_vectors(
             layout.sqlite_path(resolved.name),
             layout.vectors_path(resolved.name),
@@ -84,13 +86,6 @@ def build_index(
 
     _record_index(layout.manifest_path, source, resolved, stats, vectors_built)
     return BuildResult(profile=resolved, stats=stats, vectors_built=vectors_built)
-
-
-def _default_encoder() -> Encoder:
-    """Return the process-wide encoder, imported lazily to avoid loading torch."""
-    from bestee_chat.embeddings import default_encoder
-
-    return default_encoder()
 
 
 def _record_index(

@@ -8,11 +8,27 @@ A small conversational chatbot.
 uv sync
 ```
 
-## Run
+## Command line
+
+Everything is under the unified `bestee-chat` command:
 
 ```sh
-uv run bestee-chat
+uv run bestee-chat --help
 ```
+
+| Command | Purpose |
+| --- | --- |
+| `bestee-chat resources status` | hardware, the auto profile, and what is cached |
+| `bestee-chat resources download [--dump]` | download the embedding model (and optionally a dump) |
+| `bestee-chat resources index` | build a Wikipedia dump's search index |
+| `bestee-chat resources clean --model/--dump/--persons/--articles` | delete cached resources |
+| `bestee-chat learn person <url>` | learn a person from a live Wikipedia page |
+| `bestee-chat learn article <query>` | learn an article by searching a local dump |
+| `bestee-chat wiki search <query>` | query a built dump index |
+| `bestee-chat chat` | the (placeholder) chat loop |
+
+Set `BESTEE_OFFLINE=1` to forbid all network access (model and dumps), and
+`BESTEE_CACHE_DIR` to relocate every cache (default `~/.cache/bestee-chat`).
 
 ## Semantic similarity
 
@@ -22,16 +38,17 @@ answers using local sentence embeddings (via `sentence-transformers`), and the
 on-device; weights are downloaded once from the Hugging Face Hub and cached
 locally.
 
-Pre-download the default model (useful before going offline):
+Pre-download the embedding model (useful before going offline):
 
 ```sh
-uv run bestee-chat-download
+uv run bestee-chat resources download
 ```
 
-Afterwards you can force fully offline operation:
+Afterwards a single switch forces fully offline operation (it also sets
+`HF_HUB_OFFLINE`):
 
 ```sh
-HF_HUB_OFFLINE=1 uv run bestee-chat
+BESTEE_OFFLINE=1 uv run bestee-chat wiki search "..."
 ```
 
 ### Hardware adaptivity
@@ -79,22 +96,22 @@ layer engages automatically when `torch` and the hardware allow. See
 ### CLI
 
 ```sh
-# What will `auto` pick on this machine?
-uv run bestee-chat-wiki status
+# What will `auto` pick on this machine, and what's already cached?
+uv run bestee-chat resources status
 
 # Download + verify the latest Simple English dump (resumable, sha1-checked).
-uv run bestee-chat-wiki download --lang simple
+uv run bestee-chat resources download --dump --lang simple
 
 # Build the index at the auto-selected quality profile.
-uv run bestee-chat-wiki index --lang simple --profile auto
+uv run bestee-chat resources index --lang simple --profile auto
 
 # Query it.
-uv run bestee-chat-wiki search "List of English kings" --lang simple
+uv run bestee-chat wiki search "List of English kings" --lang simple
 ```
 
-`search` accepts `--build` to construct the index on first use, and every
-command takes `--json` for scripting. Scale up with `--lang en` (full English
-Wikipedia); pin a reproducible dump with `--dated YYYYMMDD`.
+`wiki search` accepts `--build` to construct the index on first use, and takes
+`--json` for scripting. Scale up with `--lang en` (full English Wikipedia); pin
+a reproducible dump with `--dated YYYYMMDD`.
 
 ### Library
 

@@ -11,18 +11,9 @@ from collections.abc import Sequence
 
 from bestee_chat.embeddings import Encoder
 from bestee_chat.engine import Candidate, Knowledge
+from bestee_chat.wiki._util import normalise
 from bestee_chat.wiki.query import search_wiki
 from bestee_chat.wiki.sources import WikiSource
-
-
-def _normalise(values: list[float]) -> list[float]:
-    """Min-max scale ``values`` into ``[0, 1]`` (all 0.5 when degenerate)."""
-    if not values:
-        return []
-    lo, hi = min(values), max(values)
-    if hi <= lo:
-        return [0.5 for _ in values]
-    return [(v - lo) / (hi - lo) for v in values]
 
 
 class WikiKnowledge(Knowledge):
@@ -61,7 +52,7 @@ class WikiKnowledge(Knowledge):
             cache_dir=self._cache_dir,
             encoder=self._encoder,
         )
-        scores = _normalise([hit.score for hit in hits])
+        scores = normalise([hit.score for hit in hits])
         return [
             Candidate(answer=hit.snippet, score=score, source=hit.title)
             for hit, score in zip(hits, scores, strict=True)

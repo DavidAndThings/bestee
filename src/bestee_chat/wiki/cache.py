@@ -18,10 +18,10 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from bestee_chat import config
 from bestee_chat.wiki.sources import WikiSource
 
 _CACHE_ENV = "BESTEE_WIKI_CACHE"
-_DEFAULT_CACHE = "~/.cache/bestee-chat/wiki"
 _MANIFEST_NAME = "manifest.json"
 
 
@@ -31,12 +31,12 @@ def resolve_cache_root(cache_dir: str | os.PathLike[str] | None = None) -> Path:
     The directory is *not* created here; callers create the specific
     sub-paths they need via :class:`CacheLayout`.
     """
-    raw = (
-        str(cache_dir)
-        if cache_dir is not None
-        else os.environ.get(_CACHE_ENV) or _DEFAULT_CACHE
-    )
-    return Path(raw).expanduser()
+    if cache_dir is not None:
+        return Path(cache_dir).expanduser()
+    override = os.environ.get(_CACHE_ENV)
+    if override:
+        return Path(override).expanduser()
+    return config.cache_root() / "wiki"
 
 
 @dataclass(frozen=True, slots=True)

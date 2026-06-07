@@ -12,6 +12,7 @@ from __future__ import annotations
 import logging
 
 from bestee_chat.embeddings import Encoder, cosine_scores
+from bestee_chat.wiki._util import normalise, optional_encoder
 from bestee_chat.wiki.cache import CacheLayout, get_layout
 from bestee_chat.wiki.hardware import probe_hardware
 from bestee_chat.wiki.index import LexicalIndex
@@ -24,17 +25,6 @@ logger = logging.getLogger(__name__)
 
 #: Weight given to the semantic signal when blending with normalised BM25.
 SEMANTIC_WEIGHT = 0.7
-
-
-def _normalise(values: list[float]) -> list[float]:
-    """Min-max scale ``values`` into ``[0, 1]`` (all 0.5 when degenerate)."""
-    if not values:
-        return []
-    lo, hi = min(values), max(values)
-    if hi <= lo:
-        return [0.5 for _ in values]
-    span = hi - lo
-    return [(v - lo) / span for v in values]
 
 
 def search_wiki(
@@ -84,7 +74,7 @@ def _rerank(
     encoder: Encoder | None,
 ) -> list[SearchHit]:
     """Blend BM25 and semantic similarity over the recalled ``hits``."""
-    enc = encoder or _default_encoder()
+    enc = encoder or optional_encoder()
     if enc is None:
         return hits
 
@@ -97,7 +87,7 @@ def _rerank(
     sims = cosine_scores(sub, query_vec)
     sim_by_pid = {pid: float(sims[i]) for i, pid in enumerate(present)}
 
-    bm25_norm = _normalise([h.score for h in hits])
+    bm25_norm = normalise([h.score for h in hits])
     blended: list[SearchHit] = []
     for hit, lex_norm in zip(hits, bm25_norm, strict=True):
         sim = sim_by_pid.get(hit.page_id)
@@ -109,15 +99,6 @@ def _rerank(
 
     blended.sort(key=lambda h: h.score, reverse=True)
     return blended
-
-
-def _default_encoder() -> Encoder | None:
-    """Return the shared encoder, or ``None`` if ``torch`` is unavailable."""
-    try:
-        from bestee_chat.embeddings import default_encoder
-    except Exception:
-        return None
-    return default_encoder()
 
 
 def _with_score(hit: SearchHit, score: float) -> SearchHit:

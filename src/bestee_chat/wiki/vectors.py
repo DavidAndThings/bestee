@@ -16,16 +16,16 @@ this same interface.
 from __future__ import annotations
 
 import sqlite3
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from pathlib import Path
 
 import numpy as np
 
 from bestee_chat.embeddings import Encoder
+from bestee_chat.wiki._util import ProgressCallback
 from bestee_chat.wiki.profiles import GRANULARITY_LEAD
 
 _MAX_BODY_CHARS = 2000
-ProgressCallback = Callable[[int, int], None]
 
 
 def _encode_texts(encoder: Encoder, texts: Sequence[str]) -> np.ndarray:

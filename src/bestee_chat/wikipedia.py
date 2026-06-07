@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import re
 from pathlib import Path
 from uuid import uuid4
@@ -11,7 +10,7 @@ import httpx
 from bs4 import BeautifulSoup, Tag
 from dotenv import load_dotenv
 
-from bestee_chat.config import _DEFAULT_PERSONS_DIR, _PERSONS_DIR_ENV
+from bestee_chat import config
 from bestee_chat.storage import store_mapping
 
 _USER_AGENT = "bestee-chat/0.1 (https://github.com/bestee-chat)"
@@ -19,18 +18,18 @@ _TIMEOUT = 30.0
 
 
 def learn_about_a_person(url: str) -> Path:
-    """Scrape a person's infobox and store it under ``resources/persons``.
+    """Scrape a person's infobox and store it in the persons cache.
 
     The infobox is tagged with metadata (``__type__``, ``__url__``, ``__id__``)
     and handed to :func:`bestee_chat.storage.store_mapping`, which spreads
     records across size-bounded JSON files. The output directory
-    (``resources/persons`` by default, overridable with ``$BESTEE_PERSONS_DIR``)
-    is created if missing.
+    (``<cache_root>/persons`` by default, overridable with
+    ``$BESTEE_PERSONS_DIR``) is created if missing.
 
     Returns the path of the file the person was written to.
     """
     load_dotenv()
-    persons_dir = Path(os.getenv(_PERSONS_DIR_ENV) or _DEFAULT_PERSONS_DIR)
+    persons_dir = config.persons_dir()
 
     infobox = scrape_infobox(url)
     person = {

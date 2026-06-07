@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 
 from bestee_chat.engine import Brain, Candidate
-from bestee_chat.knowledge import AboutPerson
+from bestee_chat.knowledge import AboutArticle, AboutPerson
 
 
 class FakeEncoder:
@@ -134,6 +134,27 @@ def test_build_from_cache_loads_every_record(
 
     assert len(knowledge) == 2
     assert {k.name for k in knowledge} == {"Ada Lovelace", "Alan Turing"}
+
+
+# ---------------------------------------------------------------------------
+# AboutArticle (no model)
+# ---------------------------------------------------------------------------
+
+
+def test_about_article_returns_summary_as_candidate() -> None:
+    article = AboutArticle(
+        {"title": "Ada Lovelace", "summary": "An English mathematician."},
+        encoder=FakeEncoder(),
+    )
+    candidates = article.search("Ada Lovelace".split())
+    assert len(candidates) == 1
+    assert candidates[0].answer == "An English mathematician."
+    assert candidates[0].source == "Ada Lovelace"
+
+
+def test_about_article_empty_query_returns_nothing() -> None:
+    article = AboutArticle({"title": "X", "summary": "Y"}, encoder=FakeEncoder())
+    assert article.search([]) == []
 
 
 # ---------------------------------------------------------------------------
