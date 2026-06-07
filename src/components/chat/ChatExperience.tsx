@@ -69,23 +69,29 @@ function ChatExperience({
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <header className="border-base-300 flex items-center justify-between gap-3 border-b px-4 py-3">
-        <div className="flex items-center gap-2">
-          <h1 className="text-lg leading-tight font-semibold">Assistant</h1>
-          {activeSchema && (
-            <span className="badge badge-outline badge-sm">
-              {activeSchema.name}
-            </span>
-          )}
+      <header className="border-base-300 border-b">
+        <div className="px-4 py-3">
+          <div className="mx-auto flex w-full max-w-2xl items-center justify-between gap-4">
+            <div className="flex items-center gap-2">
+              <h1 className="text-lg leading-tight font-semibold">Topic</h1>
+              {activeSchema ? (
+                <span className="badge badge-outline badge-sm">
+                  {activeSchema.name}
+                </span>
+              ) : (
+                <span className="badge badge-ghost badge-sm">No topic yet</span>
+              )}
+            </div>
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              onClick={chat.reset}
+              disabled={isSubmitting}
+            >
+              New chat
+            </button>
+          </div>
         </div>
-        <button
-          type="button"
-          className="btn btn-ghost btn-sm"
-          onClick={chat.reset}
-          disabled={isSubmitting}
-        >
-          New chat
-        </button>
       </header>
 
       <ChatWindow messages={conversation.messages} typing={busy} />

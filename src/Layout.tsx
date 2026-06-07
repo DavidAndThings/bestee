@@ -6,8 +6,8 @@ import homeIcon from "./assets/icons/home.svg";
 
 function Layout() {
   return (
-    <>
-      <div className="navbar bg-base-100 shadow-sm px-0">
+    <div className="flex h-dvh flex-col">
+      <div className="navbar bg-base-100 shadow-sm px-0 shrink-0">
         <div className="mx-auto flex w-full max-w-6xl flex-wrap items-center justify-between gap-4 px-8">
           <div
             className="flex-none text-4xl"
@@ -37,8 +37,10 @@ function Layout() {
         </div>
       </div>
 
-      <Outlet />
-    </>
+      <main className="min-h-0 flex-1 overflow-y-auto">
+        <Outlet />
+      </main>
+    </div>
   );
 }
 

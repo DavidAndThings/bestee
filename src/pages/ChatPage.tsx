@@ -34,14 +34,14 @@ function ChatPage() {
 
   if (!userId || loading) {
     return (
-      <div className="flex h-[calc(100vh-4rem)] items-center justify-center">
+      <div className="flex h-full items-center justify-center">
         <span className="loading loading-spinner loading-lg" />
       </div>
     );
   }
 
   return (
-    <div className="h-[calc(100vh-4rem)]">
+    <div className="h-full">
       <ChatExperience
         key={userId}
         userId={userId}
