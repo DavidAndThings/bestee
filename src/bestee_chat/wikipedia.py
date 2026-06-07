@@ -11,13 +11,11 @@ import httpx
 from bs4 import BeautifulSoup, Tag
 from dotenv import load_dotenv
 
+from bestee_chat.config import _DEFAULT_PERSONS_DIR, _PERSONS_DIR_ENV
 from bestee_chat.storage import store_mapping
 
 _USER_AGENT = "bestee-chat/0.1 (https://github.com/bestee-chat)"
 _TIMEOUT = 30.0
-
-_PERSONS_DIR_ENV = "BESTEE_PERSONS_DIR"
-_DEFAULT_PERSONS_DIR = "resources/persons"
 
 
 def learn_about_a_person(url: str) -> Path:

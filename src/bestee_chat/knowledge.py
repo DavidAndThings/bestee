@@ -1,8 +1,14 @@
 from __future__ import annotations
 
+import json
+import os
 from collections.abc import Mapping
+from pathlib import Path
 from typing import TYPE_CHECKING
 
+from dotenv import load_dotenv
+
+from bestee_chat.config import _DEFAULT_PERSONS_DIR, _PERSONS_DIR_ENV
 from bestee_chat.engine import Exchange, Knowledge
 
 if TYPE_CHECKING:
@@ -56,6 +62,26 @@ class AboutPerson(Knowledge):
         merged: dict[str, object] = dict(data) if data else {}
         merged.update(fields)
         self._data = merged
+
+    @staticmethod
+    def build_from_cache() -> set[AboutPerson]:
+        """Build an :class:`AboutPerson` for every cached person record.
+
+        Reads the JSON-array files written by
+        :func:`bestee_chat.wikipedia.learn_about_a_person` from the persons
+        directory (``resources/persons`` by default, or ``$BESTEE_PERSONS_DIR``).
+        Each file may hold several records, so every record becomes its own
+        knowledge object.
+        """
+        load_dotenv()
+        persons_dir = Path(os.getenv(_PERSONS_DIR_ENV) or _DEFAULT_PERSONS_DIR)
+
+        persons: set[AboutPerson] = set()
+        for path in persons_dir.glob("*.json"):
+            with open(path, encoding="utf-8") as f:
+                records = json.load(f)
+            persons.update(AboutPerson(record) for record in records)
+        return persons
 
     def generate_exchanges(self) -> set[Exchange]:
         """Turn each infobox field into a question/answer :class:`Exchange`.

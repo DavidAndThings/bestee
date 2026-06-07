@@ -109,6 +109,33 @@ def test_utterances_are_hashable_tuples() -> None:
     assert hash(exchange) == hash(exchange)
 
 
+def test_build_from_cache_loads_every_record(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    persons_dir = tmp_path / "persons"
+    persons_dir.mkdir(parents=True)
+    # A single cache file may hold several person records.
+    (persons_dir / "0001.json").write_text(
+        json.dumps(
+            [
+                {"__type__": "person", "name": "Ada Lovelace", "Born": "1815"},
+                {"__type__": "person", "name": "Alan Turing", "Born": "1912"},
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("BESTEE_PERSONS_DIR", str(persons_dir))
+
+    knowledge = AboutPerson.build_from_cache()
+
+    assert len(knowledge) == 2
+    questions = " ".join(
+        " ".join(ex.user_utterance) for k in knowledge for ex in k.generate_exchanges()
+    )
+    assert "Ada Lovelace" in questions
+    assert "Alan Turing" in questions
+
+
 # ---------------------------------------------------------------------------
 # Integration test (real model + scraped resource, opt-in)
 # ---------------------------------------------------------------------------
