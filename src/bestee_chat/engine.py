@@ -4,6 +4,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
+from bestee_chat.config import EXCHANGE_REJECTION_THRESHOLD
 from bestee_chat.embeddings import cosine_similarity, default_encoder
 
 if TYPE_CHECKING:
@@ -85,6 +86,14 @@ class Knowledge(ABC):
         raise NotImplementedError
 
 
+class NoRelevantExchangeError(ValueError):
+    """Raised when no stored exchange is relevant enough to answer a query.
+
+    This occurs when the brain holds no exchanges at all, or when every
+    exchange's similarity to the query falls below the rejection threshold.
+    """
+
+
 class Brain:
     def __init__(self) -> None:
         self._knowledge_base: set[Knowledge] = set()
@@ -93,20 +102,34 @@ class Brain:
         self._knowledge_base.add(knowledge)
 
     def pick_highest_ranked_exchange(
-        self, query: Sequence[str]
+        self,
+        query: Sequence[str],
+        threshold: float = EXCHANGE_REJECTION_THRESHOLD,
     ) -> tuple[Exchange, float]:
+        """Return the exchange most similar to ``query`` and its score.
 
-        highest_ranked_exchange = None
-        highest_ranked_score = 0.0
+        Every exchange is scored by semantic similarity to ``query``; an
+        exchange is *rejected* when its score is below ``threshold``. If every
+        exchange is rejected -- i.e. the query is unrelated to everything the
+        brain knows -- a :class:`NoRelevantExchangeError` is raised. The same
+        error is raised when the brain holds no exchanges at all.
+        """
+        best_exchange: Exchange | None = None
+        best_score = float("-inf")
 
         for knowledge in self._knowledge_base:
             for exchange in knowledge.generate_exchanges():
                 score = exchange.similarity(query)
-                if score > highest_ranked_score:
-                    highest_ranked_score = score
-                    highest_ranked_exchange = exchange
+                if score > best_score:
+                    best_score = score
+                    best_exchange = exchange
 
-        if highest_ranked_exchange is None:
-            raise ValueError("No exchanges found")
+        if best_exchange is None:
+            raise NoRelevantExchangeError("the brain has no exchanges to rank")
+        if best_score < threshold:
+            raise NoRelevantExchangeError(
+                f"all exchanges rejected: best similarity {best_score:.3f} is "
+                f"below the rejection threshold {threshold}"
+            )
 
-        return highest_ranked_exchange, highest_ranked_score
+        return best_exchange, best_score

@@ -3,7 +3,12 @@ import os
 import numpy as np
 import pytest
 
-from bestee_chat.engine import Exchange
+from bestee_chat.engine import (
+    Brain,
+    Exchange,
+    Knowledge,
+    NoRelevantExchangeError,
+)
 
 
 class FakeEncoder:
@@ -69,6 +74,68 @@ def test_user_embedding_is_cached() -> None:
     exchange.similarity("hi".split())
     exchange.similarity("hey".split())
     assert encoder.calls.count("hello world") == 1
+
+
+# ---------------------------------------------------------------------------
+# Brain rejection behavior (deterministic, no model)
+# ---------------------------------------------------------------------------
+
+
+class _FixedKnowledge(Knowledge):
+    """Knowledge that yields a fixed set of exchanges."""
+
+    def __init__(self, exchanges: set[Exchange]) -> None:
+        super().__init__()
+        self._exchanges = exchanges
+
+    def generate_exchanges(self) -> set[Exchange]:
+        return self._exchanges
+
+
+def _brain_with(exchange: Exchange) -> Brain:
+    brain = Brain()
+    brain.add_knowledge(_FixedKnowledge({exchange}))
+    return brain
+
+
+def test_accepts_exchange_scoring_at_or_above_threshold() -> None:
+    # query and the exchange's question map to the same vector -> cosine 1.0
+    encoder = FakeEncoder({"when born": [1.0, 0.0], "born when": [1.0, 0.0]})
+    exchange = Exchange(("when", "born"), ("In 1815.",), encoder=encoder)
+    brain = _brain_with(exchange)
+
+    result, score = brain.pick_highest_ranked_exchange(["born", "when"])
+
+    assert result is exchange
+    assert score == pytest.approx(1.0)
+
+
+def test_rejects_when_every_exchange_is_below_threshold() -> None:
+    # query is orthogonal to the only exchange -> cosine 0.0 < 0.5
+    encoder = FakeEncoder({"when born": [1.0, 0.0], "cake recipe": [0.0, 1.0]})
+    exchange = Exchange(("when", "born"), ("In 1815.",), encoder=encoder)
+    brain = _brain_with(exchange)
+
+    with pytest.raises(NoRelevantExchangeError):
+        brain.pick_highest_ranked_exchange(["cake", "recipe"])
+
+
+def test_empty_brain_raises() -> None:
+    with pytest.raises(NoRelevantExchangeError):
+        Brain().pick_highest_ranked_exchange(["anything"])
+
+
+def test_threshold_argument_controls_rejection() -> None:
+    # cosine([1, 1], [1, 0]) = 1 / sqrt(2) ~= 0.707
+    encoder = FakeEncoder({"a b": [1.0, 1.0], "q": [1.0, 0.0]})
+    exchange = Exchange(("a", "b"), ("answer",), encoder=encoder)
+    brain = _brain_with(exchange)
+
+    _, score = brain.pick_highest_ranked_exchange(["q"])  # default 0.5 -> accepted
+    assert score == pytest.approx(0.70710, abs=1e-4)
+
+    with pytest.raises(NoRelevantExchangeError):
+        brain.pick_highest_ranked_exchange(["q"], threshold=0.8)
 
 
 @pytest.mark.skipif(
