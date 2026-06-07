@@ -38,7 +38,7 @@ function Card({
             className="h-full w-full object-contain p-4"
           />
         ) : (
-          <div className="from-primary/30 to-secondary/30 flex h-full w-full items-center justify-center bg-gradient-to-br">
+          <div className="from-primary/30 to-secondary/30 flex h-full w-full items-center justify-center bg-linear-to-br">
             <span className="text-base-content/40 text-sm">Image</span>
           </div>
         )}

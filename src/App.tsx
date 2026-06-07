@@ -1,68 +1,48 @@
 import { useState } from "react";
-import Card, { type CardProps } from "./components/Card";
-import paperMoney from "./assets/gifs/paper-money.gif";
-import coins from "./assets/gifs/coins.gif";
-import pencil from "./assets/gifs/pencil.gif";
-import barChart from "./assets/gifs/bar-chart.gif";
-
-const cards: Omit<CardProps, "favourited" | "onFavourite">[] = [
-  {
-    title: "Morning Routine",
-    description:
-      "Kick off your day with a curated set of habits and reminders tailored to you.",
-    badge: "Daily",
-    imageUrl: paperMoney,
-    buttonVariant: "btn-primary",
-  },
-  {
-    title: "Focus Sessions",
-    description:
-      "Block out distractions and dive deep with guided focus timers and ambient sounds.",
-    badge: "Productivity",
-    imageUrl: coins,
-    buttonVariant: "btn-secondary",
-  },
-  {
-    title: "Meal Planner",
-    description:
-      "Plan balanced meals for the week and generate a smart shopping list in seconds.",
-    badge: "Wellness",
-    imageUrl: pencil,
-    buttonVariant: "btn-accent",
-  },
-  {
-    title: "Weekly Review",
-    description:
-      "Reflect on your progress, celebrate wins, and set intentions for the week ahead.",
-    badge: "Reflection",
-    imageUrl: barChart,
-    buttonVariant: "btn-success",
-  },
-];
+import { useAuth } from "@clerk/react";
+import { useNavigate } from "react-router-dom";
+import Card from "./components/Card";
+import { SCHEMA_REGISTRY } from "./config/schemas";
 
 function App() {
+  const navigate = useNavigate();
+  const { isSignedIn } = useAuth();
   const [favourites, setFavourites] = useState<Set<string>>(new Set());
 
-  const toggleFavourite = (title: string) =>
+  const toggleFavourite = (id: string) =>
     setFavourites((prev) => {
       const next = new Set(prev);
-      if (next.has(title)) {
-        next.delete(title);
+      if (next.has(id)) {
+        next.delete(id);
       } else {
-        next.add(title);
+        next.add(id);
       }
       return next;
     });
 
+  const startChat = (schemaName: string) => {
+    if (isSignedIn) {
+      navigate("/chat", { state: { seed: `Let's set up a ${schemaName}.` } });
+    } else {
+      navigate("/sign-in");
+    }
+  };
+
   return (
     <div className="p-8">
       <div className="mx-auto grid max-w-6xl grid-cols-1 gap-6 sm:grid-cols-2">
-        {cards.map((card) => (
+        {SCHEMA_REGISTRY.map((schema) => (
           <Card
-            key={card.title}
-            {...card}
-            favourited={favourites.has(card.title)}
-            onFavourite={() => toggleFavourite(card.title)}
+            key={schema.id}
+            title={schema.name}
+            description={schema.description}
+            badge={schema.badge}
+            imageUrl={schema.imageUrl}
+            buttonVariant={schema.buttonVariant}
+            actionLabel={isSignedIn ? "Start chat" : "Sign in to start"}
+            onAction={() => startChat(schema.name)}
+            favourited={favourites.has(schema.id)}
+            onFavourite={() => toggleFavourite(schema.id)}
           />
         ))}
       </div>
