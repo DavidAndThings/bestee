@@ -7,6 +7,7 @@ import ChatWindow from "./ChatWindow";
 import ChatInput from "./ChatInput";
 import QuickReplies, { type QuickReply } from "./QuickReplies";
 import ConfirmationCard from "./ConfirmationCard";
+import botIcon from "../../assets/icons/icons8-message-bot.svg";
 
 export type ChatExperienceProps = {
   userId: string;
@@ -73,6 +74,7 @@ function ChatExperience({
         <div className="px-4 py-3">
           <div className="mx-auto flex w-full max-w-2xl items-center justify-between gap-4">
             <div className="flex items-center gap-2">
+              <img src={botIcon} alt="" className="size-8" />
               <h1 className="text-lg leading-tight font-semibold">Topic</h1>
               {activeSchema ? (
                 <span className="badge badge-outline badge-sm">
