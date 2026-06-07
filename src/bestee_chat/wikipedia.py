@@ -1,9 +1,10 @@
-"""Scrape a person's infobox from a Wikipedia page into a plain dict."""
+"""Learn a person's infobox from a live Wikipedia page or a local dump."""
 
 from __future__ import annotations
 
 import re
 from pathlib import Path
+from typing import TYPE_CHECKING
 from uuid import uuid4
 
 import httpx
@@ -13,12 +14,30 @@ from dotenv import load_dotenv
 from bestee_chat import config
 from bestee_chat.storage import store_mapping
 
+if TYPE_CHECKING:
+    from bestee_chat.wiki.sources import WikiSource
+
 _USER_AGENT = "bestee-chat/0.1 (https://github.com/bestee-chat)"
 _TIMEOUT = 30.0
 
 
-def learn_about_a_person(url: str) -> Path:
-    """Scrape a person's infobox and store it in the persons cache.
+def learn_about_a_person(
+    target: str,
+    *,
+    source: WikiSource | None = None,
+    cache_dir: str | None = None,
+) -> Path:
+    """Learn a person's infobox and store it in the persons cache.
+
+    Two sources are supported:
+
+    * **Live URL** (default): ``target`` is a full Wikipedia page URL and the
+      infobox is scraped from the rendered HTML over HTTP.
+    * **Local dump**: pass a :class:`~bestee_chat.wiki.sources.WikiSource` as
+      ``source`` and ``target`` becomes the article *title* to look up in that
+      source's already-downloaded dump; the infobox is parsed from the page's
+      wikitext. This path needs no network access. ``cache_dir`` overrides the
+      wiki cache root used to locate the dump.
 
     The infobox is tagged with metadata (``__type__``, ``__url__``, ``__id__``)
     and handed to :func:`bestee_chat.storage.store_mapping`, which spreads
@@ -26,19 +45,46 @@ def learn_about_a_person(url: str) -> Path:
     (``<cache_root>/persons`` by default, overridable with
     ``$BESTEE_PERSONS_DIR``) is created if missing.
 
-    Returns the path of the file the person was written to.
+    Returns the path of the file the person was written to. Raises
+    ``FileNotFoundError`` if the dump is missing, or ``LookupError`` if no page
+    with that title exists in the dump.
     """
     load_dotenv()
-    persons_dir = config.persons_dir()
 
-    infobox = scrape_infobox(url)
+    if source is not None:
+        infobox, url = _infobox_from_dump(target, source, cache_dir)
+    else:
+        infobox, url = scrape_infobox(target), target
+
     person = {
         "__type__": "person",
         "__url__": url,
         "__id__": str(uuid4()),
         **infobox,
     }
-    return store_mapping(person, persons_dir)
+    return store_mapping(person, config.persons_dir())
+
+
+def _infobox_from_dump(
+    title: str, source: WikiSource, cache_dir: str | None
+) -> tuple[dict[str, str], str]:
+    """Look ``title`` up in ``source``'s local dump; return ``(infobox, url)``."""
+    from bestee_chat.wiki.cache import get_layout
+    from bestee_chat.wiki.infobox import extract_person_infobox
+
+    dump_path = get_layout(source, cache_dir).dump_path
+    if not dump_path.exists():
+        raise FileNotFoundError(
+            f"no dump for {source.slug} at {dump_path}; download it first with "
+            "`bestee-chat resources download --dump`"
+        )
+
+    found = extract_person_infobox(dump_path, title)
+    if found is None:
+        raise LookupError(f"no page titled {title!r} in the {source.slug} dump")
+
+    resolved_title, infobox = found
+    return infobox, source.page_url(resolved_title)
 
 
 def scrape_infobox(url: str) -> dict[str, str]:

@@ -23,6 +23,7 @@ uv run bestee-chat --help
 | `bestee-chat resources index` | build a Wikipedia dump's search index |
 | `bestee-chat resources clean --model/--dump/--persons/--articles` | delete cached resources |
 | `bestee-chat learn person <url>` | learn a person from a live Wikipedia page |
+| `bestee-chat learn person --dump <title>` | learn a person from a downloaded dump (offline) |
 | `bestee-chat learn article <query>` | learn an article by searching a local dump |
 | `bestee-chat wiki search <query>` | query a built dump index |
 | `bestee-chat chat` | the (placeholder) chat loop |
@@ -85,6 +86,26 @@ print(json.dumps(data, indent=2))
 The keys are the infobox row labels (plus a `"name"` key from the title), with
 citations and hidden markup stripped out. Returns an empty dict if the page has
 no infobox.
+
+The same data can be learned **offline** from a downloaded dump, parsing the
+infobox out of the page's wikitext instead of scraping HTML. Pass a
+`WikiSource` and an article title (rather than a URL):
+
+```python
+from bestee_chat.wikipedia import learn_about_a_person
+from bestee_chat.wiki.sources import WikiSource
+
+# Online: scrape a live page.
+learn_about_a_person("https://simple.wikipedia.org/wiki/Ada_Lovelace")
+
+# Offline: look the title up in an already-downloaded dump.
+learn_about_a_person("Ada Lovelace", source=WikiSource())
+```
+
+From the CLI, `bestee-chat learn person --dump "Ada Lovelace"` does the same
+(with `--lang`/`--dated`/`--cache-dir` selecting the dump). The dump path
+follows redirects and resolves common infobox templates (dates, lists,
+marriages) into readable text.
 
 ## Wikipedia dump search (`bestee_chat.wiki`)
 

@@ -245,14 +245,38 @@ def learn() -> None:
 
 
 @learn.command("person")
-@click.argument("url")
-def learn_person_cmd(url) -> None:
-    """Learn a person from a live Wikipedia page URL."""
-    if config.is_offline():
-        raise click.UsageError("cannot learn a person while BESTEE_OFFLINE is set")
+@click.argument("target")
+@click.option(
+    "--dump",
+    "from_dump",
+    is_flag=True,
+    help="read TARGET as an article title from a local dump (offline) "
+    "instead of scraping a live URL",
+)
+@_source_options
+def learn_person_cmd(target, from_dump, lang, dated, no_multistream, cache_dir) -> None:
+    """Learn a person from a live Wikipedia URL, or a local dump with --dump.
+
+    Without --dump, TARGET is a page URL scraped over HTTP. With --dump, TARGET
+    is an article title looked up in a downloaded dump (works offline); the
+    --lang/--dated/--no-multistream/--cache-dir options select which dump.
+    """
     from bestee_chat.learn import learn_person
 
-    click.echo(f"learned person -> {learn_person(url)}")
+    if from_dump:
+        source = _make_source(lang, dated, no_multistream)
+        try:
+            path = learn_person(target, source=source, cache_dir=cache_dir)
+        except (FileNotFoundError, LookupError) as exc:
+            raise click.UsageError(str(exc)) from exc
+    else:
+        if config.is_offline():
+            raise click.UsageError(
+                "cannot scrape a live URL while BESTEE_OFFLINE is set; "
+                "use --dump to learn from a local dump instead"
+            )
+        path = learn_person(target)
+    click.echo(f"learned person -> {path}")
 
 
 @learn.command("article")

@@ -2,7 +2,8 @@
 
 Two sources are supported today:
 
-* :func:`learn_person` -- scrape a person's infobox from a live Wikipedia URL.
+* :func:`learn_person` -- learn a person's infobox from a live Wikipedia URL or
+  from a local dump (look the title up offline).
 * :func:`learn_article` -- read the output of a local dump *search* and cache
   the best-matching article.
 
@@ -23,9 +24,20 @@ from bestee_chat.wiki.sources import WikiSource
 from bestee_chat.wikipedia import learn_about_a_person
 
 
-def learn_person(url: str) -> Path:
-    """Scrape a person's infobox from ``url`` and cache it as a ``person``."""
-    return learn_about_a_person(url)
+def learn_person(
+    target: str,
+    *,
+    source: WikiSource | None = None,
+    cache_dir: str | None = None,
+) -> Path:
+    """Learn a person's infobox and cache it as a ``person``.
+
+    With ``source`` omitted, ``target`` is a live Wikipedia page URL scraped
+    over HTTP. With a ``source`` given, ``target`` is an article *title* looked
+    up in that source's downloaded dump (works fully offline). See
+    :func:`bestee_chat.wikipedia.learn_about_a_person`.
+    """
+    return learn_about_a_person(target, source=source, cache_dir=cache_dir)
 
 
 def learn_article(
