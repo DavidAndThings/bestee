@@ -53,14 +53,21 @@ def detect_device() -> str:
     return "cpu"
 
 
-def cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
-    """Return the cosine similarity of two vectors, or ``0.0`` if either is zero."""
-    vec_a = np.asarray(a, dtype=np.float64)
-    vec_b = np.asarray(b, dtype=np.float64)
-    norm = float(np.linalg.norm(vec_a) * np.linalg.norm(vec_b))
-    if norm == 0.0:
-        return 0.0
-    return float(np.dot(vec_a, vec_b) / norm)
+def cosine_scores(matrix: np.ndarray, vector: np.ndarray) -> np.ndarray:
+    """Return the cosine similarity of ``vector`` against each row of ``matrix``.
+
+    ``matrix`` has shape ``(n, d)`` and ``vector`` shape ``(d,)``; the result
+    has shape ``(n,)``. Rows (or the vector) with zero norm score ``0.0``, and
+    an empty ``matrix`` yields an empty result. This lets a caller encode a
+    query once and score it against many precomputed embeddings at once.
+    """
+    mat = np.asarray(matrix, dtype=np.float64)
+    vec = np.asarray(vector, dtype=np.float64)
+    if mat.size == 0:
+        return np.zeros(0, dtype=np.float64)
+    denom = np.linalg.norm(mat, axis=1) * float(np.linalg.norm(vec))
+    denom[denom == 0.0] = 1.0
+    return (mat @ vec) / denom
 
 
 class SemanticEncoder:

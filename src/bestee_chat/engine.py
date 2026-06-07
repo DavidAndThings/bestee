@@ -2,134 +2,94 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from bestee_chat.config import EXCHANGE_REJECTION_THRESHOLD
-from bestee_chat.embeddings import cosine_similarity, default_encoder
+from bestee_chat.config import CANDIDATE_REJECTION_THRESHOLD
 
 if TYPE_CHECKING:
-    import numpy as np
-
     from bestee_chat.embeddings import Encoder
 
 
-class Exchange:
-    def __init__(
-        self,
-        user_utterance: Sequence[str],
-        bot_utterance: Sequence[str],
-        encoder: Encoder | None = None,
-    ) -> None:
-        self.user_utterance = user_utterance
-        self.bot_utterance = bot_utterance
-        self._encoder = encoder
-        self._user_embedding: np.ndarray | None = None
+@dataclass(frozen=True)
+class Candidate:
+    """A possible answer to a query, produced by a piece of :class:`Knowledge`.
 
-    @property
-    def encoder(self) -> Encoder:
-        """The encoder used for embeddings (defaults to the shared encoder)."""
-        encoder = self._encoder
-        if encoder is None:
-            encoder = default_encoder()
-            self._encoder = encoder
-        return encoder
+    ``score`` is a relevance value (ideally a cosine in ``[0, 1]``) that the
+    :class:`Brain` uses to rank and accept/reject candidates across sources;
+    ``source`` records where the answer came from.
+    """
 
-    def similarity(self, query: Sequence[str]) -> float:
-        """Return the semantic similarity between ``query`` and ``user_utterance``.
-
-        Both token sequences are embedded with a local sentence-transformers
-        model and compared by cosine similarity. The score ranges from roughly
-        ``0.0`` (unrelated) to ``1.0`` (equivalent meaning); empty input on
-        either side yields ``0.0``. The ``user_utterance`` embedding is computed
-        once and cached.
-        """
-        query_text = " ".join(query).strip()
-        user_text = " ".join(self.user_utterance).strip()
-        if not query_text or not user_text:
-            return 0.0
-
-        user_embedding = self._user_embedding
-        if user_embedding is None:
-            user_embedding = self.encoder.encode(user_text)
-            self._user_embedding = user_embedding
-
-        query_embedding = self.encoder.encode(query_text)
-        return cosine_similarity(query_embedding, user_embedding)
-
-    def __hash__(self) -> int:
-        return hash(self.bot_utterance) + hash(self.user_utterance)
-
-    def __eq__(self, other):
-        return (
-            self.user_utterance == other.user_utterance
-            and self.bot_utterance == other.bot_utterance
-        )
-
-    def __repr__(self):
-        return (
-            f"Exchange(user_utterance={self.user_utterance}, "
-            f"bot_utterance={self.bot_utterance})"
-        )
-
-    def __str__(self):
-        return f"User: {self.user_utterance}\nBot: {self.bot_utterance}"
+    answer: str
+    score: float
+    source: str
 
 
 class Knowledge(ABC):
+    """A source of answers that can be searched with a query.
+
+    Subclasses retrieve however suits their data -- precomputed embeddings,
+    SQL, an API, on-the-fly computation -- and need not enumerate everything up
+    front. This is what lets a knowledge source be genuinely anything.
+    """
+
     def __init__(self, encoder: Encoder | None = None) -> None:
         self._encoder = encoder
 
     @abstractmethod
-    def generate_exchanges(
-        self,
-    ) -> set[Exchange]:
+    def search(self, query: Sequence[str], k: int = 5) -> list[Candidate]:
+        """Return up to ``k`` candidate answers for ``query``, best first.
+
+        Return an empty list when nothing is relevant. Scores should be
+        comparable across knowledge sources so the :class:`Brain` can rank them
+        together (a cosine / relevance value in ``[0, 1]`` is recommended).
+        """
         raise NotImplementedError
 
 
-class NoRelevantExchangeError(ValueError):
-    """Raised when no stored exchange is relevant enough to answer a query.
+class NoRelevantCandidateError(ValueError):
+    """Raised when no knowledge source can answer a query well enough.
 
-    This occurs when the brain holds no exchanges at all, or when every
-    exchange's similarity to the query falls below the rejection threshold.
+    This happens when the brain holds no knowledge, when no source returns any
+    candidate, or when every candidate scores below the rejection threshold.
     """
 
 
 class Brain:
+    """Routes a query to its knowledge sources and returns the best candidate."""
+
     def __init__(self) -> None:
         self._knowledge_base: set[Knowledge] = set()
 
     def add_knowledge(self, knowledge: Knowledge) -> None:
         self._knowledge_base.add(knowledge)
 
-    def pick_highest_ranked_exchange(
+    def best_candidate(
         self,
         query: Sequence[str],
-        threshold: float = EXCHANGE_REJECTION_THRESHOLD,
-    ) -> tuple[Exchange, float]:
-        """Return the exchange most similar to ``query`` and its score.
+        threshold: float = CANDIDATE_REJECTION_THRESHOLD,
+        k: int = 5,
+    ) -> Candidate:
+        """Return the highest-scoring candidate for ``query`` across all sources.
 
-        Every exchange is scored by semantic similarity to ``query``; an
-        exchange is *rejected* when its score is below ``threshold``. If every
-        exchange is rejected -- i.e. the query is unrelated to everything the
-        brain knows -- a :class:`NoRelevantExchangeError` is raised. The same
-        error is raised when the brain holds no exchanges at all.
+        Each knowledge source is asked to ``search`` the query; the pooled
+        candidates are ranked by score. A candidate is *rejected* when its score
+        is below ``threshold``. If every candidate is rejected -- i.e. the query
+        is unrelated to everything the brain knows -- a
+        :class:`NoRelevantCandidateError` is raised.
         """
-        best_exchange: Exchange | None = None
-        best_score = float("-inf")
+        candidates = [
+            candidate
+            for knowledge in self._knowledge_base
+            for candidate in knowledge.search(query, k)
+        ]
+        if not candidates:
+            raise NoRelevantCandidateError("no knowledge source returned a candidate")
 
-        for knowledge in self._knowledge_base:
-            for exchange in knowledge.generate_exchanges():
-                score = exchange.similarity(query)
-                if score > best_score:
-                    best_score = score
-                    best_exchange = exchange
-
-        if best_exchange is None:
-            raise NoRelevantExchangeError("the brain has no exchanges to rank")
-        if best_score < threshold:
-            raise NoRelevantExchangeError(
-                f"all exchanges rejected: best similarity {best_score:.3f} is "
-                f"below the rejection threshold {threshold}"
+        best = max(candidates, key=lambda candidate: candidate.score)
+        if best.score < threshold:
+            raise NoRelevantCandidateError(
+                f"all candidates rejected: best score {best.score:.3f} is below "
+                f"the rejection threshold {threshold}"
             )
-
-        return best_exchange, best_score
+        return best

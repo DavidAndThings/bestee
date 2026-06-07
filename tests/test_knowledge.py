@@ -1,60 +1,100 @@
+import hashlib
 import json
 import os
 from pathlib import Path
 
+import numpy as np
 import pytest
 
-from bestee_chat.engine import Brain, Exchange
+from bestee_chat.engine import Brain, Candidate
 from bestee_chat.knowledge import AboutPerson
 
-_HILLARY_JSON = (
-    Path(__file__).resolve().parent.parent / "resources" / "hillary_clinton.json"
-)
+
+class FakeEncoder:
+    """Deterministic bag-of-words encoder for fast, offline tests.
+
+    Tokens are hashed into a fixed-size vector, so texts that share words have
+    higher cosine similarity -- enough to exercise ranking without a model.
+    """
+
+    _DIM = 256
+
+    def encode(self, text: str) -> np.ndarray:
+        vector = np.zeros(self._DIM, dtype=np.float64)
+        for token in text.lower().split():
+            digest = hashlib.md5(token.encode()).hexdigest()
+            vector[int(digest, 16) % self._DIM] += 1.0
+        return vector
 
 
 # ---------------------------------------------------------------------------
-# Unit tests (no model / no network)
+# AboutPerson.search (no model)
 # ---------------------------------------------------------------------------
 
 
-def test_init_from_json_object() -> None:
+def test_search_returns_candidates_from_this_person() -> None:
     person = AboutPerson(
-        {"name": "Jane Doe", "Born": "1 January 1990", "Spouse": "John Doe"}
+        {"name": "Jane Doe", "Born": "1 January 1990", "Spouse": "John Doe"},
+        encoder=FakeEncoder(),
     )
-    exchanges = person.generate_exchanges()
-    assert len(exchanges) == 2  # "name" is excluded
-    assert all(isinstance(ex, Exchange) for ex in exchanges)
+    candidates = person.search("tell me something".split())
+    assert candidates
+    assert all(isinstance(c, Candidate) for c in candidates)
+    assert all(c.source == "Jane Doe" for c in candidates)
 
 
-def test_init_from_keyword_fields() -> None:
-    person = AboutPerson(name="Jane Doe", Born="1 January 1990", Spouse="John Doe")
-    assert len(person.generate_exchanges()) == 2
+def test_search_ranks_the_relevant_field_first() -> None:
+    person = AboutPerson(
+        {
+            "name": "Jane Doe",
+            "Born": "1 January 1990",
+            "Spouse": "John Doe",
+            "Education": "Oxford",
+        },
+        encoder=FakeEncoder(),
+    )
+    best = person.search("when was Jane Doe born".split())[0]
+    assert best.answer == "Jane Doe was born 1 January 1990."
 
 
-def test_name_is_woven_into_questions_not_its_own_field() -> None:
-    person = AboutPerson(name="Jane Doe", Born="1 January 1990")
-    (exchange,) = person.generate_exchanges()
-    question = " ".join(exchange.user_utterance).lower()
-    assert "jane doe" in question
-    assert "born" in question
+def test_search_excludes_metadata_and_name_fields() -> None:
+    person = AboutPerson(
+        {"__id__": "abc-123", "name": "Jane Doe", "Born": "1990"},
+        encoder=FakeEncoder(),
+    )
+    answers = " ".join(c.answer for c in person.search("id".split()))
+    assert "abc-123" not in answers
+    assert "born" in answers.lower()  # only the Born field produced a candidate
 
 
-def test_answer_contains_name_and_value() -> None:
-    person = AboutPerson(name="Jane Doe", Born="1 January 1990")
-    (exchange,) = person.generate_exchanges()
-    answer = " ".join(exchange.bot_utterance)
-    assert "Jane Doe" in answer
-    assert "1 January 1990" in answer
+def test_search_returns_empty_without_a_name() -> None:
+    person = AboutPerson({"Born": "1990"}, encoder=FakeEncoder())
+    assert person.search("when born".split()) == []
 
 
-def test_empty_values_are_skipped() -> None:
-    person = AboutPerson(name="Jane Doe", Born="", Spouse="John Doe")
-    assert len(person.generate_exchanges()) == 1
+def test_search_returns_empty_for_blank_query() -> None:
+    person = AboutPerson({"name": "Jane Doe", "Born": "1990"}, encoder=FakeEncoder())
+    assert person.search([]) == []
 
 
-def test_missing_name_returns_empty_set() -> None:
-    person = AboutPerson(Born="1 January 1990")
-    assert person.generate_exchanges() == set()
+def test_search_respects_k() -> None:
+    person = AboutPerson(
+        {
+            "name": "Jane Doe",
+            "Born": "1990",
+            "Spouse": "John",
+            "Children": "Kid",
+            "Party": "Independent",
+            "Awards": "A prize",
+        },
+        encoder=FakeEncoder(),
+    )
+    assert len(person.search("anything".split(), k=2)) == 2
+
+
+# ---------------------------------------------------------------------------
+# Field/metadata helpers and cache loading
+# ---------------------------------------------------------------------------
 
 
 def test_field_name_normalises_labels() -> None:
@@ -65,48 +105,12 @@ def test_field_name_normalises_labels() -> None:
     )
 
 
-def test_dunder_metadata_fields_are_skipped() -> None:
-    person = AboutPerson(
-        {
-            "__type__": "__person__",
-            "__id__": "abc-123",
-            "name": "Jane Doe",
-            "Born": "1990",
-        }
-    )
-    exchanges = person.generate_exchanges()
-    assert len(exchanges) == 1  # only "Born"; name + dunder metadata excluded
-    text = " ".join(
-        " ".join(ex.user_utterance) + " " + " ".join(ex.bot_utterance)
-        for ex in exchanges
-    )
-    assert "abc-123" not in text
-    assert "__id__" not in text and "__type__" not in text
-
-
 def test_is_metadata_only_matches_dunder_keys() -> None:
     assert AboutPerson._is_metadata("__id__")
     assert AboutPerson._is_metadata("__type__")
     assert not AboutPerson._is_metadata("name")
     assert not AboutPerson._is_metadata("Born")
     assert not AboutPerson._is_metadata("_id")  # single underscore is not metadata
-
-
-def test_labels_with_spaces_become_questions() -> None:
-    person = AboutPerson({"name": "Jane Doe", "Resting place": "Old Cemetery"})
-    (exchange,) = person.generate_exchanges()
-    question = " ".join(exchange.user_utterance).lower()
-    assert "resting place" in question
-
-
-def test_utterances_are_hashable_tuples() -> None:
-    # generate_exchanges returns a set, which requires hashable Exchanges,
-    # which in turn requires tuple (not list) utterances.
-    person = AboutPerson(name="Jane Doe", Born="1 January 1990")
-    (exchange,) = person.generate_exchanges()
-    assert isinstance(exchange.user_utterance, tuple)
-    assert isinstance(exchange.bot_utterance, tuple)
-    assert hash(exchange) == hash(exchange)
 
 
 def test_build_from_cache_loads_every_record(
@@ -129,15 +133,11 @@ def test_build_from_cache_loads_every_record(
     knowledge = AboutPerson.build_from_cache()
 
     assert len(knowledge) == 2
-    questions = " ".join(
-        " ".join(ex.user_utterance) for k in knowledge for ex in k.generate_exchanges()
-    )
-    assert "Ada Lovelace" in questions
-    assert "Alan Turing" in questions
+    assert {k.name for k in knowledge} == {"Ada Lovelace", "Alan Turing"}
 
 
 # ---------------------------------------------------------------------------
-# Integration test (real model + scraped resource, opt-in)
+# Integration test (real model, opt-in)
 # ---------------------------------------------------------------------------
 
 
@@ -145,19 +145,20 @@ def test_build_from_cache_loads_every_record(
     not os.environ.get("BESTEE_RUN_INTEGRATION"),
     reason="set BESTEE_RUN_INTEGRATION=1 to run model-backed tests",
 )
-@pytest.mark.skipif(
-    not _HILLARY_JSON.exists(),
-    reason="resources/hillary_clinton.json is not present",
-)
-def test_brain_answers_birth_question_from_infobox() -> None:
-    data = json.loads(_HILLARY_JSON.read_text(encoding="utf-8"))
-    brain = Brain()
-    brain.add_knowledge(AboutPerson(data))
-
-    exchange, score = brain.pick_highest_ranked_exchange(
-        "When was Hillary Clinton born?".split()
+def test_brain_answers_birth_question_with_real_model() -> None:
+    person = AboutPerson(
+        {
+            "name": "Ada Lovelace",
+            "Born": "10 December 1815, London, England",
+            "Spouse": "William King",
+            "Known for": "the first computer program",
+        }
     )
-    answer = " ".join(exchange.bot_utterance)
+    brain = Brain()
+    brain.add_knowledge(person)
 
-    assert score > 0.0
-    assert "1947" in answer or "born" in answer.lower()
+    best = brain.best_candidate("when was Ada Lovelace born?".split())
+
+    assert best.source == "Ada Lovelace"
+    assert "1815" in best.answer or "born" in best.answer.lower()
+    assert best.score > 0.0

@@ -16,10 +16,11 @@ uv run bestee-chat
 
 ## Semantic similarity
 
-`Exchange.similarity` scores how close a query is in meaning to a stored
-user utterance using local sentence embeddings (via `sentence-transformers`).
-The model runs entirely on-device; weights are downloaded once from the
-Hugging Face Hub and cached locally.
+A `Knowledge` source scores how close a query is in meaning to its stored
+answers using local sentence embeddings (via `sentence-transformers`), and the
+`Brain` returns the best `Candidate` across all sources. The model runs entirely
+on-device; weights are downloaded once from the Hugging Face Hub and cached
+locally.
 
 Pre-download the default model (useful before going offline):
 
