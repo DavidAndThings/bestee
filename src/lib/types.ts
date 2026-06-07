@@ -53,3 +53,17 @@ export type Conversation = {
   createdAt: number;
   updatedAt: number;
 };
+
+export type JobStatus = "queued" | "running" | "completed" | "failed";
+
+/** A submitted analysis job, uniquely identified by a uuid. */
+export type Job = {
+  id: string;
+  userId: string;
+  /** The tool (schema) this job ran. */
+  schemaId: string;
+  status: JobStatus;
+  payload: Record<string, unknown>;
+  createdAt: number;
+  updatedAt: number;
+};

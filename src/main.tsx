@@ -9,6 +9,7 @@ import SignInPage from "./pages/SignInPage.tsx";
 import SignUpPage from "./pages/SignUpPage.tsx";
 import AccountPage from "./pages/AccountPage.tsx";
 import ChatPage from "./pages/ChatPage.tsx";
+import JobsPage from "./pages/JobsPage.tsx";
 import RequireAuth from "./components/RequireAuth.tsx";
 
 const PUBLISHABLE_KEY = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY;
@@ -36,6 +37,7 @@ createRoot(document.getElementById("root")!).render(
             <Route path="account/*" element={<AccountPage />} />
             <Route element={<RequireAuth />}>
               <Route path="chat" element={<ChatPage />} />
+              <Route path="jobs" element={<JobsPage />} />
             </Route>
           </Route>
         </Routes>

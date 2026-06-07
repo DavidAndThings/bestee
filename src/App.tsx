@@ -3,6 +3,7 @@ import { useAuth } from "@clerk/react";
 import { useNavigate } from "react-router-dom";
 import Card from "./components/Card";
 import { SCHEMA_REGISTRY } from "./config/schemas";
+import pocketConsole from "./assets/gifs/pocket-console.gif";
 
 function App() {
   const navigate = useNavigate();
@@ -28,6 +29,10 @@ function App() {
     }
   };
 
+  const goToJobs = () => {
+    navigate(isSignedIn ? "/jobs" : "/sign-in");
+  };
+
   return (
     <div className="p-8">
       <div className="mx-auto grid max-w-6xl grid-cols-1 gap-6 sm:grid-cols-2">
@@ -45,6 +50,18 @@ function App() {
             onFavourite={() => toggleFavourite(schema.id)}
           />
         ))}
+        <Card
+          key="job-status"
+          title="Job Status"
+          description="Track the status of your submitted analysis jobs."
+          badge="Jobs"
+          imageUrl={pocketConsole}
+          buttonVariant="btn-info"
+          actionLabel={isSignedIn ? "View jobs" : "Sign in to view"}
+          onAction={goToJobs}
+          favourited={favourites.has("job-status")}
+          onFavourite={() => toggleFavourite("job-status")}
+        />
       </div>
     </div>
   );
