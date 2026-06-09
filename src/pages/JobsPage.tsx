@@ -21,15 +21,15 @@ function JobsPage() {
   const { jobs, loading, refresh } = useJobs(userId);
 
   return (
-    <div className="p-8">
-      <div className="mx-auto max-w-4xl">
+    <div className="p-4 sm:p-8">
+      <div className="mx-auto max-w-3xl">
         <div className="mb-6 px-4">
           <Link to="/" className="link link-hover text-base-content/60 text-sm">
             ← Back to Home
           </Link>
           <div className="mt-4 flex items-center justify-between gap-4">
             <div>
-              <h1 className="text-2xl font-semibold">Job Status</h1>
+              <h1 className="text-2xl font-semibold sm:text-3xl">Job Status</h1>
             </div>
             <div className="tooltip tooltip-left" data-tip="refresh">
               <button
@@ -45,7 +45,7 @@ function JobsPage() {
           </div>
         </div>
 
-        {loading ? (
+        {loading && jobs.length === 0 ? (
           <div className="flex justify-center p-12">
             <span className="loading loading-spinner loading-lg" />
           </div>
@@ -86,7 +86,7 @@ function JobsPage() {
                         {relativeTime(job.createdAt)}
                       </td>
                       <td className="text-right">
-                        <div className="flex items-center justify-end gap-2">
+                        <div className="flex flex-nowrap items-center justify-end gap-2">
                           {job.status !== "queued" && (
                             <div
                               className="tooltip tooltip-left"

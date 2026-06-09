@@ -33,5 +33,12 @@ export function useJobs(userId: string | null | undefined): JobsState {
     };
   }, [userId, reloadToken]);
 
-  return { jobs, loading, refresh };
+  // Reflect refetches in `loading` so callers can disable their refresh
+  // controls and avoid firing overlapping requests.
+  const refreshWithLoading = useCallback(() => {
+    setLoading(true);
+    refresh();
+  }, [refresh]);
+
+  return { jobs, loading, refresh: refreshWithLoading };
 }

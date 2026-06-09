@@ -99,9 +99,18 @@ function ChartSetupPage() {
     return <Navigate to="/" replace />;
   }
 
+  const closeDropdown = () => {
+    if (document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur();
+    }
+  };
+
   const updateValue = (key: string, value: string) => {
     setValues((prev) => ({ ...prev, [key]: value }));
+    // Only touch error state when there's actually an error to clear,
+    // avoiding a second re-render on every keystroke.
     setErrors((prev) => {
+      if (!(key in prev)) return prev;
       const next = { ...prev };
       delete next[key];
       return next;
@@ -135,62 +144,81 @@ function ChartSetupPage() {
   };
 
   return (
-    <div className="p-8">
+    <div className="p-4 sm:p-8">
       <div className="mx-auto max-w-3xl">
-        <div className="mb-6">
+        <div className="mb-4">
           <Link to="/" className="link link-hover text-base-content/60 text-sm">
             ← Back to Home
           </Link>
-          <div className="mt-4 flex flex-wrap items-start justify-between gap-4">
-            <div>
-              <h1 className="text-3xl font-semibold">{schema.name}</h1>
-              <p className="text-base-content/70 mt-2 max-w-2xl">
-                {schema.description}
-              </p>
-            </div>
-            {schema.badge && (
-              <span className="badge badge-primary badge-outline">
-                {schema.badge}
-              </span>
-            )}
-          </div>
         </div>
 
         <form onSubmit={handleSubmit} className="card bg-base-100 shadow-md">
           <div className="card-body gap-7 sm:gap-8">
+            <div className="border-base-300 border-b pb-6">
+              <div className="flex flex-wrap items-start justify-between gap-4">
+                <div className="min-w-0">
+                  <h1 className="card-title wrap-break-word text-2xl sm:text-3xl">
+                    {schema.name}
+                  </h1>
+                  <p className="text-base-content/70 wrap-break-word mt-2 max-w-2xl">
+                    {schema.description}
+                  </p>
+                </div>
+                {schema.badge && (
+                  <span className="badge badge-primary badge-outline">
+                    {schema.badge}
+                  </span>
+                )}
+              </div>
+            </div>
             {entries.map(([key, def]) => {
               const id = `field-${key}`;
               const error = errors[key];
               return (
-                <label
-                  key={key}
-                  className="form-control w-full gap-4"
-                  htmlFor={id}
-                >
-                  <div className="label px-0 py-0">
-                    <span className="label-text text-sm font-semibold tracking-wide">
-                      {humanizeKey(key)}
-                    </span>
-                  </div>
+                <div key={key} className="form-control w-full">
+                  <label
+                    htmlFor={id}
+                    className="label-text mb-5 block text-base font-semibold tracking-wide"
+                  >
+                    {humanizeKey(key)}
+                  </label>
 
                   {def.choices ? (
-                    <select
-                      id={id}
-                      className={`select select-bordered w-full ${
-                        error ? "select-error" : ""
-                      }`}
-                      value={values[key] ?? ""}
-                      onChange={(event) => updateValue(key, event.target.value)}
-                    >
-                      <option value="" disabled>
-                        Select an option
-                      </option>
-                      {def.choices.map((choice) => (
-                        <option key={choice} value={choice}>
-                          {choice}
-                        </option>
-                      ))}
-                    </select>
+                    <div className="dropdown dropdown-bottom w-full">
+                      <button
+                        id={id}
+                        type="button"
+                        className={`btn bg-base-200 border-base-300 hover:bg-base-300 min-h-12 w-full justify-between border font-normal ${
+                          error ? "border-error text-error" : ""
+                        }`}
+                      >
+                        <span
+                          className={values[key] ? "" : "text-base-content/50"}
+                        >
+                          {values[key] || "Select an option"}
+                        </span>
+                        <span aria-hidden="true">⌄</span>
+                      </button>
+                      <ul
+                        tabIndex={0}
+                        className="dropdown-content menu bg-base-200 rounded-box border-base-300 z-20 mt-2 max-h-60 w-full overflow-y-auto border p-2 shadow-xl"
+                      >
+                        {def.choices.map((choice) => (
+                          <li key={choice}>
+                            <button
+                              type="button"
+                              className={values[key] === choice ? "active" : ""}
+                              onClick={() => {
+                                updateValue(key, choice);
+                                closeDropdown();
+                              }}
+                            >
+                              {choice}
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
                   ) : def.type === "array" ? (
                     <textarea
                       id={id}
@@ -214,25 +242,27 @@ function ChartSetupPage() {
                     />
                   )}
 
-                  <div className="label flex-col items-start gap-1 px-0 py-0 sm:flex-row sm:items-center">
-                    <span className="label-text-alt text-base-content/60 leading-relaxed">
+                  <div className="mt-5 flex flex-col items-start gap-2 sm:flex-row sm:items-center">
+                    <span className="text-base-content/60 text-sm leading-relaxed">
                       {def.description}
                       {def.type === "array" &&
                         " Separate values with commas or new lines."}
                     </span>
                     {error && (
-                      <span className="label-text-alt text-error">{error}</span>
+                      <span className="text-error text-sm">{error}</span>
                     )}
                   </div>
-                </label>
+                </div>
               );
             })}
 
             {submitState.status === "success" && (
-              <div className="alert alert-success">
+              <div className="alert alert-success flex-col items-start sm:flex-row sm:items-center">
                 <span>
                   Job created. ID:{" "}
-                  <span className="font-mono">{submitState.jobId}</span>
+                  <span className="break-all font-mono">
+                    {submitState.jobId}
+                  </span>
                 </span>
                 <Link to="/jobs" className="btn btn-sm">
                   View jobs

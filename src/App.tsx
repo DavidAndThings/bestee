@@ -30,14 +30,17 @@ function App() {
   };
 
   return (
-    <div className="p-8">
-      <div className="mx-auto grid max-w-6xl grid-cols-1 gap-6 sm:grid-cols-2">
+    <div className="py-8">
+      <div className="mx-auto grid w-full max-w-6xl grid-cols-1 gap-6 px-8 sm:grid-cols-2">
         {SCHEMA_REGISTRY.map((schema) => (
           <Card
             key={schema.id}
             title={schema.name}
-            description={schema.description}
-            badge={schema.badge}
+            description={
+              schema.badge
+                ? `${schema.badge} · ${schema.description}`
+                : schema.description
+            }
             imageUrl={schema.imageUrl}
             buttonVariant={schema.buttonVariant}
             actionLabel={isSignedIn ? "Configure" : "Sign in to start"}
