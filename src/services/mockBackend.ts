@@ -1,47 +1,17 @@
-import type { Conversation, Job } from "../lib/types";
+import type { Job } from "../lib/types";
 
 /**
- * A stand-in for a real backend. The user's single conversation is persisted to
- * localStorage, namespaced per Clerk user id, and every operation simulates
- * network latency. Swap this file's internals for real HTTP calls without
- * touching the rest of the app (see `chatApi.ts`, the single integration point).
+ * A stand-in for a real backend. Jobs are persisted to localStorage, namespaced
+ * per Clerk user id, and every operation simulates network latency. Swap this
+ * file's internals for real HTTP calls without touching the page/hooks (see
+ * `jobsApi.ts`, the single integration point).
  */
 
-const STORAGE_PREFIX = "bestee:chat:";
 const JOBS_PREFIX = "bestee:jobs:";
 
 function delay<T>(value: T, ms = 250): Promise<T> {
   return new Promise((resolve) => setTimeout(() => resolve(value), ms));
 }
-
-function storageKey(userId: string): string {
-  return `${STORAGE_PREFIX}${userId}`;
-}
-
-export function loadConversation(userId: string): Promise<Conversation | null> {
-  try {
-    const raw = localStorage.getItem(storageKey(userId));
-    if (!raw) return delay(null);
-    const parsed = JSON.parse(raw) as unknown;
-    const valid =
-      parsed &&
-      typeof parsed === "object" &&
-      Array.isArray((parsed as Conversation).messages);
-    return delay(valid ? (parsed as Conversation) : null);
-  } catch {
-    return delay(null);
-  }
-}
-
-export function saveConversation(
-  userId: string,
-  conversation: Conversation,
-): Promise<Conversation> {
-  localStorage.setItem(storageKey(userId), JSON.stringify(conversation));
-  return delay(conversation, 120);
-}
-
-// ── Jobs ───────────────────────────────────────────────────────────────────
 
 function jobsKey(userId: string): string {
   return `${JOBS_PREFIX}${userId}`;
@@ -138,25 +108,25 @@ export function listJobs(userId: string): Promise<Job[]> {
   return delay(jobs);
 }
 
-export type SubmitInput = {
+export type SubmitJobInput = {
   schemaId: string;
   payload: Record<string, unknown>;
 };
 
-export type SubmitResult = {
+export type SubmitJobResult = {
   ok: boolean;
   requestId: string;
   receivedAt: number;
 };
 
 /**
- * Pretends to dispatch a completed tool call's payload to a backend, and
- * records it as a tracked job (uniquely identified by `requestId`).
+ * Pretends to dispatch a chart configuration payload to a backend, and records
+ * it as a tracked job (uniquely identified by `requestId`).
  */
-export function submitPayload(
+export function submitJob(
   userId: string,
-  input: SubmitInput,
-): Promise<SubmitResult> {
+  input: SubmitJobInput,
+): Promise<SubmitJobResult> {
   const requestId = crypto.randomUUID();
   const now = Date.now();
   const job: Job = {
@@ -172,7 +142,7 @@ export function submitPayload(
   jobs.push(job);
   writeJobs(userId, jobs);
 
-  console.info("[mockBackend] submit", {
+  console.info("[mockBackend] submit job", {
     userId,
     schemaId: input.schemaId,
     requestId,

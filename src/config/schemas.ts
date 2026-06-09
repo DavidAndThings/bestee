@@ -22,16 +22,16 @@ export type FieldDef = {
 export type Schema = {
   /** Stable identifier used as the URL param and storage key. */
   id: string;
-  /** Card title and chat heading. */
+  /** Card title and chart setup heading. */
   name: string;
-  /** Card description and chat intro. */
+  /** Card description and chart setup intro. */
   description: string;
   badge?: string;
   imageUrl?: string;
   buttonVariant?: ButtonVariant;
   /**
    * Ordered map of field definitions. Insertion order determines the order in
-   * which fields are collected during the chat.
+   * which fields are rendered in the chart setup form.
    */
   parameters: Record<string, FieldDef>;
 };
@@ -112,9 +112,9 @@ const PORTFOLIO_BACKTEST_SCHEMA: Schema = {
 };
 
 /**
- * The single source of truth for available tools. Each entry renders a card on
- * the home page and powers a chat-driven form at `/chat/:id`. Add a new tool by
- * appending one `Schema` object here.
+ * The single source of truth for available charts. Each entry renders a card on
+ * the home page and powers a chart setup form at `/charts/:id`. Add a new chart
+ * by appending one `Schema` object here.
  */
 export const SCHEMA_REGISTRY: Schema[] = [
   RELATIVE_ROTATION_GRAPH_SCHEMA,

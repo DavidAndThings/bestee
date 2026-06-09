@@ -4,7 +4,7 @@ export function humanizeKey(key: string): string {
   return spaced.charAt(0).toUpperCase() + spaced.slice(1);
 }
 
-/** Renders a collected value for display in summaries and chat. */
+/** Renders a value for display in summaries and tables. */
 export function formatValue(value: unknown): string {
   if (value === undefined || value === null || value === "") {
     return "—";

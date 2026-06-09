@@ -1,6 +1,8 @@
 import * as mockBackend from "./mockBackend";
 import type { Job } from "../lib/types";
 
+export type { SubmitJobInput, SubmitJobResult } from "./mockBackend";
+
 /**
  * Jobs data layer. Delegates to the localStorage-backed mock today; point this
  * at a real API later without touching the page or hook.
@@ -8,5 +10,11 @@ import type { Job } from "../lib/types";
 export const jobsApi = {
   listJobs(userId: string): Promise<Job[]> {
     return mockBackend.listJobs(userId);
+  },
+  submitJob(
+    userId: string,
+    input: mockBackend.SubmitJobInput,
+  ): Promise<mockBackend.SubmitJobResult> {
+    return mockBackend.submitJob(userId, input);
   },
 };

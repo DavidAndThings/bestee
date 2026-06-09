@@ -23,23 +23,25 @@ function JobsPage() {
   return (
     <div className="p-8">
       <div className="mx-auto max-w-4xl">
-        <div className="mb-6 flex items-center justify-between gap-4 px-4">
-          <div>
-            <h1 className="text-2xl font-semibold">Job Status</h1>
-            <p className="text-base-content/60 text-sm">
-              Track your submitted analysis jobs.
-            </p>
-          </div>
-          <div className="tooltip tooltip-left" data-tip="refresh">
-            <button
-              type="button"
-              className="btn btn-ghost btn-circle btn-sm"
-              onClick={refresh}
-              disabled={loading}
-              aria-label="refresh"
-            >
-              <img src={refreshIcon} alt="" className="size-5" />
-            </button>
+        <div className="mb-6 px-4">
+          <Link to="/" className="link link-hover text-base-content/60 text-sm">
+            ← Back to Home
+          </Link>
+          <div className="mt-4 flex items-center justify-between gap-4">
+            <div>
+              <h1 className="text-2xl font-semibold">Job Status</h1>
+            </div>
+            <div className="tooltip tooltip-left" data-tip="refresh">
+              <button
+                type="button"
+                className="btn btn-ghost btn-circle btn-sm"
+                onClick={refresh}
+                disabled={loading}
+                aria-label="refresh"
+              >
+                <img src={refreshIcon} alt="" className="size-5" />
+              </button>
+            </div>
           </div>
         </div>
 
@@ -50,8 +52,8 @@ function JobsPage() {
         ) : jobs.length === 0 ? (
           <div className="border-base-300 rounded-box border border-dashed p-10 text-center">
             <p className="text-base-content/60">No jobs yet.</p>
-            <Link to="/chat" className="btn btn-primary btn-sm mt-4">
-              Start a request
+            <Link to="/" className="btn btn-primary btn-sm mt-4">
+              Choose a chart
             </Link>
           </div>
         ) : (

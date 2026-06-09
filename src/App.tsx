@@ -21,12 +21,8 @@ function App() {
       return next;
     });
 
-  const startChat = (schemaName: string) => {
-    if (isSignedIn) {
-      navigate("/chat", { state: { seed: `Let's set up a ${schemaName}.` } });
-    } else {
-      navigate("/sign-in");
-    }
+  const openChartSetup = (schemaId: string) => {
+    navigate(isSignedIn ? `/charts/${schemaId}` : "/sign-in");
   };
 
   const goToJobs = () => {
@@ -44,8 +40,8 @@ function App() {
             badge={schema.badge}
             imageUrl={schema.imageUrl}
             buttonVariant={schema.buttonVariant}
-            actionLabel={isSignedIn ? "Start chat" : "Sign in to start"}
-            onAction={() => startChat(schema.name)}
+            actionLabel={isSignedIn ? "Configure" : "Sign in to start"}
+            onAction={() => openChartSetup(schema.id)}
             favourited={favourites.has(schema.id)}
             onFavourite={() => toggleFavourite(schema.id)}
           />
