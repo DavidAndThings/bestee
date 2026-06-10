@@ -31,6 +31,8 @@ from bestee_compute.stocks.decorators import (
     TimeSeriesCacheDecorator,
     TimeSeriesDerivedDecorator,
     TimeSeriesMetricDecorator,
+)
+from bestee_compute.stocks.indicators import (
     relative_strength_index,
     simple_moving_average,
     stochastic_oscillator,
@@ -1012,12 +1014,14 @@ class TestStochasticOscillatorMath:
         k, _ = stochastic_oscillator(highs, lows, closes, k_period=3, d_period=1)
         assert k[2] == pytest.approx(50.0)
 
-    def test_zero_range_window_returns_none(self) -> None:
+    def test_zero_range_window_yields_zero(self) -> None:
+        # TA-Lib reports %K as 0.0 (not None) for a flat, zero-range window.
         highs = [5.0, 5.0, 5.0]
         lows = [5.0, 5.0, 5.0]
         closes = [5.0, 5.0, 5.0]
         k, _ = stochastic_oscillator(highs, lows, closes, k_period=3, d_period=1)
-        assert k[2] is None
+        assert k[0] is None and k[1] is None
+        assert k[2] == pytest.approx(0.0)
 
     def test_empty_input_returns_empty(self) -> None:
         k, d = stochastic_oscillator([], [], [], k_period=14, d_period=3)
@@ -1181,10 +1185,14 @@ class TestRsiMath:
         assert rsi[3] == pytest.approx(0.0)
         assert rsi[5] == pytest.approx(0.0)
 
-    def test_flat_series_returns_none(self) -> None:
+    def test_flat_series_yields_zero_after_warmup(self) -> None:
+        # TA-Lib reports RSI 0.0 (not None) past the warmup for a wholly flat
+        # series: with no gains, relative strength is 0.
         closes = [5.0, 5.0, 5.0, 5.0, 5.0]
         rsi = relative_strength_index(closes, period=3)
-        assert all(v is None for v in rsi)
+        assert rsi[0] is None and rsi[1] is None and rsi[2] is None
+        assert rsi[3] == pytest.approx(0.0)
+        assert rsi[4] == pytest.approx(0.0)
 
     def test_classic_wilder_example(self) -> None:
         closes = [10.0, 11.0, 10.0, 11.0, 10.0, 11.0]
@@ -1239,14 +1247,15 @@ class TestRsiDecorator:
         kb = chain.build_kb()
         assert kb.stock_data["AAPL"].numeric_metrics["rsi"] is None
 
-    def test_flat_series_yields_none(self) -> None:
+    def test_flat_series_yields_zero(self) -> None:
+        # TA-Lib's RSI is 0.0 (not None) for a wholly flat series past warmup.
         stub = _stub_with_tickers(["AAPL"])
         ts_close = _ts_def(tag="ts_c")
         cache_c = TimeSeriesCacheDecorator("ts_c", ts_close, stub)
         chain = RelativeStrengthIndexDecorator("rsi", "ts_c", 3, ts_close, cache_c)
         with patch(_GET_TS_PATCH, return_value=[5.0] * 10):
             kb = chain.build_kb()
-        assert kb.stock_data["AAPL"].numeric_metrics["rsi"] is None
+        assert kb.stock_data["AAPL"].numeric_metrics["rsi"] == pytest.approx(0.0)
 
 
 # ── RSI DSL wiring ──────────────────────────────────────────────────

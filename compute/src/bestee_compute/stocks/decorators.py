@@ -33,6 +33,11 @@ import numpy as np
 
 from bestee_compute.stocks import columns as cols
 from bestee_compute.stocks.financials import build_financials_df
+from bestee_compute.stocks.indicators import (
+    relative_strength_index,
+    simple_moving_average,
+    stochastic_oscillator,
+)
 from bestee_compute.stocks.market import get_time_series
 from bestee_compute.stocks.models import (
     FinancialMetric,
@@ -755,52 +760,6 @@ class TimeSeriesMetricDecorator(KnowledgeBaseDecorator):
 # ── Stochastic oscillator ────────────────────────────────────────────
 
 
-def stochastic_oscillator(
-    highs: Sequence[float],
-    lows: Sequence[float],
-    closes: Sequence[float],
-    k_period: int,
-    d_period: int,
-) -> tuple[list[float | None], list[float | None]]:
-    """Compute the classic stochastic-oscillator %K and %D series."""
-    if k_period < 1 or d_period < 1:
-        msg = (
-            f"stochastic_oscillator periods must be >= 1; "
-            f"got k_period={k_period}, d_period={d_period}"
-        )
-        raise ValueError(msg)
-    n = min(len(highs), len(lows), len(closes))
-    if n == 0:
-        return [], []
-    highs_arr = np.asarray(highs[:n], dtype=np.float64)
-    lows_arr = np.asarray(lows[:n], dtype=np.float64)
-    closes_arr = np.asarray(closes[:n], dtype=np.float64)
-    k_values: list[float | None] = []
-    for i in range(n):
-        if i < k_period - 1:
-            k_values.append(None)
-            continue
-        window_low = float(lows_arr[i - k_period + 1 : i + 1].min())
-        window_high = float(highs_arr[i - k_period + 1 : i + 1].max())
-        denom = window_high - window_low
-        if denom == 0.0:
-            k_values.append(None)
-            continue
-        k_values.append(100.0 * (float(closes_arr[i]) - window_low) / denom)
-    d_values: list[float | None] = []
-    warmup = k_period - 1 + d_period - 1
-    for i in range(n):
-        if i < warmup:
-            d_values.append(None)
-            continue
-        window = k_values[i - d_period + 1 : i + 1]
-        if any(v is None for v in window):
-            d_values.append(None)
-            continue
-        d_values.append(sum(v for v in window if v is not None) / d_period)
-    return k_values, d_values
-
-
 class StochasticOscillatorDecorator(KnowledgeBaseDecorator):
     """Compute %K and %D and store them as time series + latest scalars.
 
@@ -908,43 +867,6 @@ class StochasticOscillatorDecorator(KnowledgeBaseDecorator):
 # ── Relative Strength Index (Wilder's smoothing) ─────────────────────
 
 
-def relative_strength_index(
-    closes: Sequence[float],
-    period: int,
-) -> list[float | None]:
-    """Compute Wilder's Relative Strength Index series."""
-    if period < 1:
-        msg = f"RSI period must be >= 1; got {period}"
-        raise ValueError(msg)
-    n = len(closes)
-    if n < period + 1:
-        return [None] * n
-    arr = np.asarray(closes, dtype=np.float64)
-    deltas = np.diff(arr)
-    gains = np.where(deltas > 0, deltas, 0.0)
-    losses = np.where(deltas < 0, -deltas, 0.0)
-
-    def _rsi_from(g: float, ll: float) -> float | None:
-        if g == 0.0 and ll == 0.0:
-            return None
-        if ll == 0.0:
-            return 100.0
-        rs = g / ll
-        return 100.0 - 100.0 / (1.0 + rs)
-
-    avg_gain = float(gains[:period].mean())
-    avg_loss = float(losses[:period].mean())
-    rsi: list[float | None] = [None] * n
-    rsi[period] = _rsi_from(avg_gain, avg_loss)
-    for i in range(period + 1, n):
-        gain = float(gains[i - 1])
-        loss = float(losses[i - 1])
-        avg_gain = (avg_gain * (period - 1) + gain) / period
-        avg_loss = (avg_loss * (period - 1) + loss) / period
-        rsi[i] = _rsi_from(avg_gain, avg_loss)
-    return rsi
-
-
 class RelativeStrengthIndexDecorator(KnowledgeBaseDecorator):
     """Compute Wilder's RSI and store as a time series + latest scalar.
 
@@ -1007,35 +929,6 @@ class RelativeStrengthIndexDecorator(KnowledgeBaseDecorator):
 
 
 # ── Simple Moving Average ────────────────────────────────────────────
-
-
-def simple_moving_average(
-    values: Sequence[float],
-    period: int,
-) -> list[float | None]:
-    """Compute the simple moving average series.
-
-    Bars whose window has fewer than ``period`` observations, or whose
-    window contains a ``NaN`` (which is how the pipeline encodes the
-    warmup of upstream indicators), produce ``None``.  This keeps SMA
-    composable with other indicators: stacking ``SMA smoothed rsi14 5``
-    on top of an RSI series still yields a usable scalar in the tail.
-    """
-    if period < 1:
-        msg = f"SMA period must be >= 1; got {period}"
-        raise ValueError(msg)
-    n = len(values)
-    if n == 0:
-        return []
-    arr = np.asarray(values, dtype=np.float64)
-    sma: list[float | None] = [None] * n
-    for i in range(period - 1, n):
-        window = arr[i - period + 1 : i + 1]
-        if bool(np.isnan(window).any()):
-            sma[i] = None
-            continue
-        sma[i] = float(window.mean())
-    return sma
 
 
 class SimpleMovingAverageDecorator(KnowledgeBaseDecorator):
