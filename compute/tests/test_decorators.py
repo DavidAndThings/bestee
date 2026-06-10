@@ -9,6 +9,7 @@ import polars as pl
 import pytest
 
 import bestee_compute.resources
+from bestee_compute.stocks import expressions
 from bestee_compute.stocks.builder import (
     ProcessingLevelError,
     _process_time_series,
@@ -151,54 +152,54 @@ class TestComputedMetricParse:
             ComputedMetricDecorator("x", "rev + 'oops'", self._stub())
 
 
-# ── ComputedMetricDecorator._evaluate ────────────────────────────────
+# ── expressions.evaluate_scalar ──────────────────────────────────────
 
 
 def _expr(src: str) -> ast.Expression:
     return ast.parse(src, mode="eval")
 
 
-class TestComputedMetricEvaluate:
+class TestEvaluateScalar:
     def test_constant(self) -> None:
-        assert ComputedMetricDecorator._evaluate(_expr("42"), {}) == 42.0
+        assert expressions.evaluate_scalar(_expr("42"), {}) == 42.0
 
     def test_addition_subtraction(self) -> None:
-        assert ComputedMetricDecorator._evaluate(_expr("3 + 4 - 1"), {}) == 6.0
+        assert expressions.evaluate_scalar(_expr("3 + 4 - 1"), {}) == 6.0
 
     def test_division(self) -> None:
-        assert ComputedMetricDecorator._evaluate(_expr("10 / 4"), {}) == 2.5
+        assert expressions.evaluate_scalar(_expr("10 / 4"), {}) == 2.5
 
     def test_division_by_zero_returns_none(self) -> None:
-        assert ComputedMetricDecorator._evaluate(_expr("10 / 0"), {}) is None
+        assert expressions.evaluate_scalar(_expr("10 / 0"), {}) is None
 
     def test_modulo_by_zero_returns_none(self) -> None:
-        assert ComputedMetricDecorator._evaluate(_expr("10 % 0"), {}) is None
+        assert expressions.evaluate_scalar(_expr("10 % 0"), {}) is None
 
     def test_power(self) -> None:
-        assert ComputedMetricDecorator._evaluate(_expr("2 ** 3"), {}) == 8.0
+        assert expressions.evaluate_scalar(_expr("2 ** 3"), {}) == 8.0
 
     def test_unary_minus(self) -> None:
-        assert ComputedMetricDecorator._evaluate(_expr("-5"), {}) == -5.0
+        assert expressions.evaluate_scalar(_expr("-5"), {}) == -5.0
 
     def test_placeholder_lookup(self) -> None:
         env: dict[str, float | None] = {"_v0": 100.0, "_v1": 25.0}
-        assert ComputedMetricDecorator._evaluate(_expr("_v0 / _v1"), env) == 4.0
+        assert expressions.evaluate_scalar(_expr("_v0 / _v1"), env) == 4.0
 
     def test_missing_placeholder_propagates_none(self) -> None:
         env: dict[str, float | None] = {"_v1": 25.0}
-        assert ComputedMetricDecorator._evaluate(_expr("_v0 / _v1"), env) is None
+        assert expressions.evaluate_scalar(_expr("_v0 / _v1"), env) is None
 
     def test_explicit_none_propagates(self) -> None:
         env: dict[str, float | None] = {"_v0": None, "_v1": 25.0}
-        assert ComputedMetricDecorator._evaluate(_expr("_v0 * _v1"), env) is None
+        assert expressions.evaluate_scalar(_expr("_v0 * _v1"), env) is None
 
     def test_unsupported_operator_raises(self) -> None:
         with pytest.raises(ValueError, match="Unsupported binary operator"):
-            ComputedMetricDecorator._evaluate(_expr("5 & 3"), {})
+            expressions.evaluate_scalar(_expr("5 & 3"), {})
 
     def test_unsupported_literal_raises(self) -> None:
         with pytest.raises(ValueError, match="Unsupported literal"):
-            ComputedMetricDecorator._evaluate(_expr("'a string'"), {})
+            expressions.evaluate_scalar(_expr("'a string'"), {})
 
 
 # ── decorator_builder dispatch ───────────────────────────────────────

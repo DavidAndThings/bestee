@@ -22,9 +22,7 @@ the :class:`KnowledgeBase` for inspection or rendering.
 
 from __future__ import annotations
 
-import ast
 import logging
-import operator
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
@@ -355,17 +353,13 @@ class ComputedMetricDecorator(KnowledgeBaseDecorator):
     so a single bad data point doesn't sink the whole metric.
     """
 
-    _GRAMMAR = expressions.ExpressionGrammar(
-        label="COMPUTED_METRIC",
-        binops=(ast.Add, ast.Sub, ast.Mult, ast.Div, ast.Pow, ast.Mod),
-        unaryops=(ast.UAdd, ast.USub),
-    )
-
     def __init__(self, name: str, expression: str, *upstream: KnowledgeBaseDecorator):
         super().__init__(upstream)
         self._name = name
         self._expression = expression
-        self._ast_tree = expressions.parse(expression, self._GRAMMAR)
+        self._ast_tree = expressions.parse(
+            expression, expressions.COMPUTED_METRIC_GRAMMAR
+        )
         self._referenced_names: list[str] = sorted(
             expressions.collect_names(self._ast_tree)
         )
@@ -376,59 +370,6 @@ class ComputedMetricDecorator(KnowledgeBaseDecorator):
             self._referenced_names,
         )
 
-    @classmethod
-    def _evaluate(
-        cls,
-        node: ast.AST,
-        env: Mapping[str, float | None],
-    ) -> float | None:
-        if isinstance(node, ast.Expression):
-            return cls._evaluate(node.body, env)
-        if isinstance(node, ast.BinOp):
-            left = cls._evaluate(node.left, env)
-            right = cls._evaluate(node.right, env)
-            if left is None or right is None:
-                return None
-            op = node.op
-            if isinstance(op, ast.Add):
-                return left + right
-            if isinstance(op, ast.Sub):
-                return left - right
-            if isinstance(op, ast.Mult):
-                return left * right
-            if isinstance(op, ast.Div):
-                if right == 0:
-                    return None
-                return left / right
-            if isinstance(op, ast.Pow):
-                return float(left**right)
-            if isinstance(op, ast.Mod):
-                if right == 0:
-                    return None
-                return left % right
-            msg = f"Unsupported binary operator: {type(op).__name__}"
-            raise ValueError(msg)
-        if isinstance(node, ast.UnaryOp):
-            operand_value = cls._evaluate(node.operand, env)
-            if operand_value is None:
-                return None
-            if isinstance(node.op, ast.USub):
-                return -operand_value
-            if isinstance(node.op, ast.UAdd):
-                return operand_value
-            msg = f"Unsupported unary operator: {type(node.op).__name__}"
-            raise ValueError(msg)
-        if isinstance(node, ast.Constant):
-            value = node.value
-            if isinstance(value, int | float):
-                return float(value)
-            msg = f"Unsupported literal: {value!r}"
-            raise ValueError(msg)
-        if isinstance(node, ast.Name):
-            return env.get(node.id)
-        msg = f"Unsupported expression node: {type(node).__name__}"
-        raise ValueError(msg)
-
     def build_kb(self) -> KnowledgeBase:
         kb = self._build_from_upstream_or_error()
         non_null = 0
@@ -437,7 +378,7 @@ class ComputedMetricDecorator(KnowledgeBaseDecorator):
             for n in self._referenced_names:
                 env[n] = stock.numeric_metrics.get(n)
             try:
-                value = self._evaluate(self._ast_tree, env)
+                value = expressions.evaluate_scalar(self._ast_tree, env)
             except TypeError, ZeroDivisionError, OverflowError:
                 value = None
             stock.numeric_metrics[self._name] = value
@@ -542,18 +483,6 @@ class TimeSeriesDerivedDecorator(KnowledgeBaseDecorator):
     ``+ - * /``, unary minus, numeric literals.
     """
 
-    _GRAMMAR = expressions.ExpressionGrammar(
-        label="TIME_SERIES_DERIVED",
-        binops=(ast.Add, ast.Sub, ast.Mult, ast.Div),
-        unaryops=(ast.USub,),
-    )
-    _BINOP_FUNCS: dict[type[ast.operator], Callable[[Any, Any], Any]] = {
-        ast.Add: operator.add,
-        ast.Sub: operator.sub,
-        ast.Mult: operator.mul,
-        ast.Div: operator.truediv,
-    }
-
     def __init__(
         self,
         alias: str,
@@ -566,7 +495,9 @@ class TimeSeriesDerivedDecorator(KnowledgeBaseDecorator):
         self._name = alias
         self._expression = expression
         self._derived_ts_def = derived_ts_def
-        self._ast_tree = expressions.parse(expression, self._GRAMMAR)
+        self._ast_tree = expressions.parse(
+            expression, expressions.TIME_SERIES_DERIVED_GRAMMAR
+        )
         self._operand_names = sorted(expressions.collect_names(self._ast_tree))
         missing = [n for n in self._operand_names if n not in set(known_aliases)]
         if missing:
@@ -575,28 +506,6 @@ class TimeSeriesDerivedDecorator(KnowledgeBaseDecorator):
                 f"undefined names {missing!r}. Defined: {sorted(known_aliases)}."
             )
             raise ValueError(msg)
-
-    @classmethod
-    def _evaluate(
-        cls,
-        node: ast.AST,
-        operands: Mapping[str, np.ndarray],
-    ) -> Any:
-        if isinstance(node, ast.Name):
-            return operands[node.id]
-        if isinstance(node, ast.Constant) and isinstance(node.value, int | float):
-            return float(node.value)
-        if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.USub):
-            return -cls._evaluate(node.operand, operands)
-        if isinstance(node, ast.BinOp) and type(node.op) in cls._BINOP_FUNCS:
-            left = cls._evaluate(node.left, operands)
-            right = cls._evaluate(node.right, operands)
-            return cls._BINOP_FUNCS[type(node.op)](left, right)
-        msg = (
-            "TIME_SERIES_DERIVED expression contains an unsupported "
-            f"construct at runtime: {type(node).__name__}"
-        )
-        raise ValueError(msg)
 
     def build_kb(self) -> KnowledgeBase:
         kb = self._build_from_upstream_or_error()
@@ -612,7 +521,7 @@ class TimeSeriesDerivedDecorator(KnowledgeBaseDecorator):
             if missing:
                 stock.set_numeric_time_series(self._name, self._derived_ts_def, [])
                 continue
-            result = self._evaluate(self._ast_tree, operands)
+            result = expressions.evaluate_series(self._ast_tree, operands)
             stock.set_numeric_time_series(
                 self._name,
                 self._derived_ts_def,
