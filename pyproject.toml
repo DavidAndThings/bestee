@@ -8,3 +8,11 @@
 
 [tool.uv.workspace]
 members = ["compute", "chat"]
+
+# Run `pytest` from the workspace root to test everything; or
+# `pytest compute` / `pytest chat` to scope.  `importmode=importlib`
+# lets two packages each have a tests/test_main.py without colliding
+# on a shared top-level `test_main` module name.
+[tool.pytest.ini_options]
+testpaths = ["compute/tests", "chat/tests"]
+addopts = "--import-mode=importlib"
