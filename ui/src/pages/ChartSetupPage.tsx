@@ -165,9 +165,12 @@ function ChartSetupPage() {
                 )}
               </div>
             </div>
-            {entries.map(([key, def]) => {
+            {entries.map(([key, def], index) => {
               const id = `field-${key}`;
               const error = errors[key];
+              // First field receives focus on mount so keyboard users
+              // can start typing immediately.
+              const autoFocus = index === 0;
               return (
                 <div key={key} className="form-control w-full">
                   <label
@@ -180,6 +183,7 @@ function ChartSetupPage() {
                   {def.choices ? (
                     <select
                       id={id}
+                      autoFocus={autoFocus}
                       className={`select select-bordered w-full ${
                         error ? "select-error" : ""
                       }`}
@@ -198,6 +202,7 @@ function ChartSetupPage() {
                   ) : def.type === "array" ? (
                     <textarea
                       id={id}
+                      autoFocus={autoFocus}
                       className={`textarea textarea-bordered min-h-28 w-full ${
                         error ? "textarea-error" : ""
                       }`}
@@ -208,6 +213,7 @@ function ChartSetupPage() {
                   ) : (
                     <input
                       id={id}
+                      autoFocus={autoFocus}
                       type={def.type === "integer" ? "number" : "text"}
                       step={def.type === "integer" ? 1 : undefined}
                       className={`input input-bordered w-full ${
