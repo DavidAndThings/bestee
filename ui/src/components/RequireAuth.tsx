@@ -1,13 +1,15 @@
-import { RedirectToSignIn, useAuth } from "@clerk/react";
-import { Outlet } from "react-router-dom";
+import { useAuth } from "@clerk/react";
+import { Navigate, Outlet, useLocation } from "react-router-dom";
 
 /**
- * Route guard for signed-in routes. Waits for Clerk to load, then either renders the
- * nested routes (signed in) or redirects to sign-in (signed out). Clerk returns
- * the user to their original destination after authenticating.
+ * Route guard for signed-in routes.  Waits for Clerk to load, then either
+ * renders the nested routes (signed in) or redirects to sign-in (signed
+ * out) with `redirect_url` set to the originally-requested path so the
+ * user lands back where they intended after authenticating.
  */
 function RequireAuth() {
   const { isLoaded, isSignedIn } = useAuth();
+  const location = useLocation();
 
   if (!isLoaded) {
     return (
@@ -18,7 +20,13 @@ function RequireAuth() {
   }
 
   if (!isSignedIn) {
-    return <RedirectToSignIn />;
+    const target = `${location.pathname}${location.search}${location.hash}`;
+    return (
+      <Navigate
+        to={`/sign-in?redirect_url=${encodeURIComponent(target)}`}
+        replace
+      />
+    );
   }
 
   return <Outlet />;

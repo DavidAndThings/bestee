@@ -21,12 +21,20 @@ function App() {
       return next;
     });
 
+  const navigateWithAuth = (target: string) => {
+    if (isSignedIn) {
+      navigate(target);
+    } else {
+      navigate(`/sign-in?redirect_url=${encodeURIComponent(target)}`);
+    }
+  };
+
   const openChartSetup = (schemaId: string) => {
-    navigate(isSignedIn ? `/charts/${schemaId}` : "/sign-in");
+    navigateWithAuth(`/charts/${schemaId}`);
   };
 
   const goToJobs = () => {
-    navigate(isSignedIn ? "/jobs" : "/sign-in");
+    navigateWithAuth("/jobs");
   };
 
   return (
