@@ -1,0 +1,76 @@
+<mediawiki xmlns="http://www.mediawiki.org/xml/export-0.11/" version="0.11" xml:lang="en">
+  <siteinfo>
+    <sitename>Wikipedia</sitename>
+    <namespaces>
+      <namespace key="0" case="first-letter" />
+      <namespace key="14" case="first-letter">Category</namespace>
+    </namespaces>
+  </siteinfo>
+  <page>
+    <title>List of English monarchs</title>
+    <ns>0</ns>
+    <id>1</id>
+    <revision>
+      <id>1001</id>
+      <text>{{Short description|none}}
+The '''monarchs of the Kingdom of England''' ruled from the union under
+[[Athelstan]] in 927 until 1707. This is a '''list of the kings and queens of
+England'''. The first king was [[Alfred the Great]].
+
+== House of Plantagenet ==
+The [[House of Plantagenet]] produced several notable kings, including
+[[Henry II of England|Henry II]] and [[Richard I of England|Richard the Lionheart]].
+
+&lt;ref&gt;Stenton, Anglo-Saxon England.&lt;/ref&gt;</text>
+    </revision>
+  </page>
+  <page>
+    <title>List of English kings</title>
+    <ns>0</ns>
+    <id>2</id>
+    <redirect title="List of English monarchs" />
+    <revision>
+      <id>1002</id>
+      <text>#REDIRECT [[List of English monarchs]]</text>
+    </revision>
+  </page>
+  <page>
+    <title>Kingdom of England</title>
+    <ns>0</ns>
+    <id>3</id>
+    <revision>
+      <id>1003</id>
+      <text>The '''Kingdom of England''' was a [[sovereign state]] on the island of
+[[Great Britain]] from 927 until 1707, ruled by a succession of [[monarch|kings]].</text>
+    </revision>
+  </page>
+  <page>
+    <title>Automobile</title>
+    <ns>0</ns>
+    <id>4</id>
+    <revision>
+      <id>1004</id>
+      <text>An '''automobile''', or '''car''', is a wheeled [[motor vehicle]] used for
+[[transport]]. Most definitions say cars run primarily on [[road]]s.</text>
+    </revision>
+  </page>
+  <page>
+    <title>Car</title>
+    <ns>0</ns>
+    <id>5</id>
+    <redirect title="Automobile" />
+    <revision>
+      <id>1005</id>
+      <text>#REDIRECT [[Automobile]]</text>
+    </revision>
+  </page>
+  <page>
+    <title>Category:English monarchs</title>
+    <ns>14</ns>
+    <id>6</id>
+    <revision>
+      <id>1006</id>
+      <text>Pages about [[monarch]]s of England.</text>
+    </revision>
+  </page>
+</mediawiki>
