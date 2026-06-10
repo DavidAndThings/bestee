@@ -31,13 +31,13 @@ function JobsPage() {
             <div>
               <h1 className="text-2xl font-semibold sm:text-3xl">Job Status</h1>
             </div>
-            <div className="tooltip tooltip-left" data-tip="refresh">
+            <div className="tooltip tooltip-left" data-tip="Refresh">
               <button
                 type="button"
                 className="btn btn-ghost btn-circle btn-sm"
                 onClick={refresh}
                 disabled={loading}
-                aria-label="refresh"
+                aria-label="Refresh"
               >
                 <img src={refreshIcon} alt="" className="size-5" />
               </button>

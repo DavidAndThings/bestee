@@ -54,12 +54,12 @@ function Card({
         </div>
         <p className="text-base-content/70">{description}</p>
         <div className="card-actions mt-2 justify-end">
-          <div className="tooltip" data-tip="like">
+          <div className="tooltip" data-tip="Like">
             <button
               type="button"
               className={`btn btn-ghost btn-circle${favourited ? " text-error" : ""}`}
               onClick={() => onFavourite?.()}
-              aria-label="like"
+              aria-label="Like"
             >
               <svg
                 xmlns="http://www.w3.org/2000/svg"
