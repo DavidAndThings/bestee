@@ -81,7 +81,7 @@ function UserMenu() {
             </form>
             <button
               type="button"
-              className="btn btn-error"
+              className="btn btn-primary"
               onClick={handleConfirm}
             >
               Sign out
