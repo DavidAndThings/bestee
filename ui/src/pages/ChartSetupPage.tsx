@@ -109,7 +109,10 @@ function ChartSetupPage() {
       delete next[key];
       return next;
     });
-    if (submitState.status !== "idle") {
+    // Clear a submit error when the user starts editing in response
+    // to it; leave a success alert alone — it's informational, the
+    // next submit will naturally overwrite it.
+    if (submitState.status === "error") {
       setSubmitState({ status: "idle" });
     }
   };
