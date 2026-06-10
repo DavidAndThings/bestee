@@ -22,7 +22,7 @@ function JobsPage() {
 
   return (
     <div className="p-4 sm:p-8">
-      <div className="mx-auto max-w-3xl">
+      <div className="mx-auto max-w-4xl">
         <div className="mb-6 px-4">
           <Link to="/" className="link link-hover text-base-content/60 text-sm">
             ← Back to Home
