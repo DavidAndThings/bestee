@@ -24,10 +24,7 @@ function JobsPage() {
     <div className="p-4 sm:p-8">
       <div className="mx-auto max-w-4xl">
         <div className="mb-6 px-4">
-          <Link to="/" className="link link-hover text-base-content/60 text-sm">
-            ← Back to Home
-          </Link>
-          <div className="mt-4 flex items-center justify-between gap-4">
+          <div className="flex items-center justify-between gap-4">
             <div>
               <h1 className="text-2xl font-semibold sm:text-3xl">Job Status</h1>
             </div>
