@@ -19,9 +19,10 @@ repos:
 
   - repo: local
     hooks:
-      - id: ty
-        name: ty check
-        entry: uvx ty check
+      - id: ty-compute
+        name: ty check (compute)
+        entry: bash -c 'cd compute && uvx ty check'
         language: system
         types: [python]
+        files: ^compute/
         pass_filenames: false
