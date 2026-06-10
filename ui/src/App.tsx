@@ -44,11 +44,8 @@ function App() {
           <Card
             key={schema.id}
             title={schema.name}
-            description={
-              schema.badge
-                ? `${schema.badge} · ${schema.description}`
-                : schema.description
-            }
+            description={schema.description}
+            badge={schema.badge}
             imageUrl={schema.imageUrl}
             buttonVariant={schema.buttonVariant}
             actionLabel={isSignedIn ? "Configure" : "Sign in to start"}
