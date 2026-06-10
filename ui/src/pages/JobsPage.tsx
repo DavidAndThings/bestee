@@ -62,7 +62,7 @@ function JobsPage() {
 
   return (
     <div className="p-4 sm:p-8">
-      <div className="mx-auto max-w-4xl">
+      <div className="mx-auto max-w-6xl">
         <div className="mb-6 px-4">
           <div className="flex items-center justify-between gap-4">
             <div>
