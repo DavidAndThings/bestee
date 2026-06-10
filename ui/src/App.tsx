@@ -39,7 +39,7 @@ function App() {
 
   return (
     <div className="py-8">
-      <div className="mx-auto grid w-full max-w-7xl grid-cols-1 gap-6 px-8 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="mx-auto grid w-full max-w-7xl grid-cols-1 gap-8 px-8 sm:grid-cols-2 lg:grid-cols-3">
         {SCHEMA_REGISTRY.map((schema) => (
           <Card
             key={schema.id}
