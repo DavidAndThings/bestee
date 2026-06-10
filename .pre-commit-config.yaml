@@ -26,3 +26,9 @@ repos:
         types: [python]
         files: ^compute/
         pass_filenames: false
+      - id: eslint-ui
+        name: eslint (ui)
+        entry: bash -c 'cd ui && npm run lint'
+        language: system
+        files: ^ui/.*\.(ts|tsx)$
+        pass_filenames: false
