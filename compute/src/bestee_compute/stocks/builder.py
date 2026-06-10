@@ -42,6 +42,7 @@ from __future__ import annotations
 import ast
 from collections.abc import Callable, Sequence
 
+from bestee_compute.stocks import expressions
 from bestee_compute.stocks.decorators import (
     AssetScopeDecorator,
     ComputedMetricDecorator,
@@ -313,7 +314,7 @@ def _process_time_series_derived(
             f"valid Python syntax: {err.msg}"
         )
         raise ProcessingLevelError(msg) from err
-    ref_names = sorted(TimeSeriesDerivedDecorator._collect_names(parsed))
+    ref_names = sorted(expressions.collect_names(parsed))
     if not ref_names:
         msg = (
             f"TIME_SERIES_DERIVED expression {expression!r} "

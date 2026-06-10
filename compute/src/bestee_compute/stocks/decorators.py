@@ -32,6 +32,7 @@ from typing import Any
 import numpy as np
 
 from bestee_compute.stocks import columns as cols
+from bestee_compute.stocks import expressions
 from bestee_compute.stocks.financials import build_financials_df
 from bestee_compute.stocks.indicators import (
     relative_strength_index,
@@ -354,68 +355,26 @@ class ComputedMetricDecorator(KnowledgeBaseDecorator):
     so a single bad data point doesn't sink the whole metric.
     """
 
-    _ALLOWED_BINOPS: tuple[type[ast.operator], ...] = (
-        ast.Add,
-        ast.Sub,
-        ast.Mult,
-        ast.Div,
-        ast.Pow,
-        ast.Mod,
+    _GRAMMAR = expressions.ExpressionGrammar(
+        label="COMPUTED_METRIC",
+        binops=(ast.Add, ast.Sub, ast.Mult, ast.Div, ast.Pow, ast.Mod),
+        unaryops=(ast.UAdd, ast.USub),
     )
-    _ALLOWED_UNARYOPS: tuple[type[ast.unaryop], ...] = (ast.UAdd, ast.USub)
 
     def __init__(self, name: str, expression: str, *upstream: KnowledgeBaseDecorator):
         super().__init__(upstream)
         self._name = name
         self._expression = expression
-        try:
-            self._ast_tree = ast.parse(expression, mode="eval").body
-        except SyntaxError as err:
-            msg = (
-                f"COMPUTED_METRIC expression {expression!r} is not "
-                f"valid Python syntax: {err.msg}"
-            )
-            raise ValueError(msg) from err
-        self._validate(self._ast_tree)
-        self._referenced_names: list[str] = sorted(self._collect_names(self._ast_tree))
+        self._ast_tree = expressions.parse(expression, self._GRAMMAR)
+        self._referenced_names: list[str] = sorted(
+            expressions.collect_names(self._ast_tree)
+        )
         logger.info(
             "ComputedMetricDecorator %r references %d name(s): %s",
             self._name,
             len(self._referenced_names),
             self._referenced_names,
         )
-
-    @classmethod
-    def _collect_names(cls, node: ast.AST) -> set[str]:
-        return {sub.id for sub in ast.walk(node) if isinstance(sub, ast.Name)}
-
-    @classmethod
-    def _validate(cls, node: ast.AST) -> None:
-        for sub in ast.walk(node):
-            if isinstance(sub, ast.Name):
-                continue
-            if isinstance(sub, ast.Constant):
-                if not isinstance(sub.value, int | float):
-                    msg = (
-                        f"COMPUTED_METRIC constants must be numeric, got {sub.value!r}"
-                    )
-                    raise ValueError(msg)
-                continue
-            if isinstance(sub, ast.UnaryOp) and isinstance(
-                sub.op, cls._ALLOWED_UNARYOPS
-            ):
-                continue
-            if isinstance(sub, ast.BinOp) and isinstance(sub.op, cls._ALLOWED_BINOPS):
-                continue
-            if isinstance(sub, ast.Expression):
-                continue
-            if isinstance(sub, ast.operator | ast.unaryop | ast.expr_context):
-                continue
-            msg = (
-                "COMPUTED_METRIC expression contains an unsupported "
-                f"construct: {type(sub).__name__}"
-            )
-            raise ValueError(msg)
 
     @classmethod
     def _evaluate(
@@ -583,11 +542,10 @@ class TimeSeriesDerivedDecorator(KnowledgeBaseDecorator):
     ``+ - * /``, unary minus, numeric literals.
     """
 
-    _ALLOWED_BINOPS: tuple[type[ast.operator], ...] = (
-        ast.Add,
-        ast.Sub,
-        ast.Mult,
-        ast.Div,
+    _GRAMMAR = expressions.ExpressionGrammar(
+        label="TIME_SERIES_DERIVED",
+        binops=(ast.Add, ast.Sub, ast.Mult, ast.Div),
+        unaryops=(ast.USub,),
     )
     _BINOP_FUNCS: dict[type[ast.operator], Callable[[Any, Any], Any]] = {
         ast.Add: operator.add,
@@ -608,52 +566,13 @@ class TimeSeriesDerivedDecorator(KnowledgeBaseDecorator):
         self._name = alias
         self._expression = expression
         self._derived_ts_def = derived_ts_def
-        try:
-            self._ast_tree = ast.parse(expression, mode="eval").body
-        except SyntaxError as err:
-            msg = (
-                f"TIME_SERIES_DERIVED expression {expression!r} is not "
-                f"valid Python syntax: {err.msg}"
-            )
-            raise ValueError(msg) from err
-        self._validate(self._ast_tree)
-        self._operand_names = sorted(self._collect_names(self._ast_tree))
+        self._ast_tree = expressions.parse(expression, self._GRAMMAR)
+        self._operand_names = sorted(expressions.collect_names(self._ast_tree))
         missing = [n for n in self._operand_names if n not in set(known_aliases)]
         if missing:
             msg = (
                 f"TIME_SERIES_DERIVED expression {expression!r} refers to "
                 f"undefined names {missing!r}. Defined: {sorted(known_aliases)}."
-            )
-            raise ValueError(msg)
-
-    @classmethod
-    def _collect_names(cls, node: ast.AST) -> set[str]:
-        return {sub.id for sub in ast.walk(node) if isinstance(sub, ast.Name)}
-
-    @classmethod
-    def _validate(cls, node: ast.AST) -> None:
-        for sub in ast.walk(node):
-            if isinstance(sub, ast.Name):
-                continue
-            if isinstance(sub, ast.Constant):
-                if not isinstance(sub.value, int | float):
-                    msg = (
-                        "TIME_SERIES_DERIVED constants must be numeric, "
-                        f"got {sub.value!r}"
-                    )
-                    raise ValueError(msg)
-                continue
-            if isinstance(sub, ast.UnaryOp) and isinstance(sub.op, ast.USub):
-                continue
-            if isinstance(sub, ast.BinOp) and isinstance(sub.op, cls._ALLOWED_BINOPS):
-                continue
-            if isinstance(sub, ast.Expression):
-                continue
-            if isinstance(sub, ast.operator | ast.unaryop | ast.expr_context):
-                continue
-            msg = (
-                "TIME_SERIES_DERIVED expression contains an unsupported "
-                f"construct: {type(sub).__name__}"
             )
             raise ValueError(msg)
 
@@ -669,7 +588,7 @@ class TimeSeriesDerivedDecorator(KnowledgeBaseDecorator):
             return float(node.value)
         if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.USub):
             return -cls._evaluate(node.operand, operands)
-        if isinstance(node, ast.BinOp) and isinstance(node.op, cls._ALLOWED_BINOPS):
+        if isinstance(node, ast.BinOp) and type(node.op) in cls._BINOP_FUNCS:
             left = cls._evaluate(node.left, operands)
             right = cls._evaluate(node.right, operands)
             return cls._BINOP_FUNCS[type(node.op)](left, right)
