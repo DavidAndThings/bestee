@@ -99,12 +99,6 @@ function ChartSetupPage() {
     return <Navigate to="/" replace />;
   }
 
-  const closeDropdown = () => {
-    if (document.activeElement instanceof HTMLElement) {
-      document.activeElement.blur();
-    }
-  };
-
   const updateValue = (key: string, value: string) => {
     setValues((prev) => ({ ...prev, [key]: value }));
     // Only touch error state when there's actually an error to clear,
@@ -184,41 +178,23 @@ function ChartSetupPage() {
                   </label>
 
                   {def.choices ? (
-                    <div className="dropdown dropdown-bottom w-full">
-                      <button
-                        id={id}
-                        type="button"
-                        className={`btn bg-base-200 border-base-300 hover:bg-base-300 min-h-12 w-full justify-between border font-normal ${
-                          error ? "border-error text-error" : ""
-                        }`}
-                      >
-                        <span
-                          className={values[key] ? "" : "text-base-content/50"}
-                        >
-                          {values[key] || "Select an option"}
-                        </span>
-                        <span aria-hidden="true">⌄</span>
-                      </button>
-                      <ul
-                        tabIndex={0}
-                        className="dropdown-content menu bg-base-200 rounded-box border-base-300 z-20 mt-2 max-h-60 w-full overflow-y-auto border p-2 shadow-xl"
-                      >
-                        {def.choices.map((choice) => (
-                          <li key={choice}>
-                            <button
-                              type="button"
-                              className={values[key] === choice ? "active" : ""}
-                              onClick={() => {
-                                updateValue(key, choice);
-                                closeDropdown();
-                              }}
-                            >
-                              {choice}
-                            </button>
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
+                    <select
+                      id={id}
+                      className={`select select-bordered w-full ${
+                        error ? "select-error" : ""
+                      }`}
+                      value={values[key] ?? ""}
+                      onChange={(event) => updateValue(key, event.target.value)}
+                    >
+                      <option value="" disabled>
+                        Select an option
+                      </option>
+                      {def.choices.map((choice) => (
+                        <option key={choice} value={choice}>
+                          {choice}
+                        </option>
+                      ))}
+                    </select>
                   ) : def.type === "array" ? (
                     <textarea
                       id={id}
