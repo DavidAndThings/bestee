@@ -1,7 +1,7 @@
 import { useAuth } from "@clerk/react";
 import { Link } from "react-router-dom";
 import { getSchema } from "../config/schemas";
-import type { JobStatus } from "../lib/types";
+import type { Job, JobStatus } from "../lib/types";
 import { relativeTime } from "../lib/format";
 import { useJobs } from "../hooks/useJobs";
 import refreshIcon from "../assets/icons/refresh.svg";
@@ -15,6 +15,46 @@ const STATUS_BADGE: Record<JobStatus, { label: string; className: string }> = {
   completed: { label: "Completed", className: "badge-success" },
   failed: { label: "Failed", className: "badge-error" },
 };
+
+/** Detail / Redo / Cancel action buttons.  Shared by the desktop table
+ *  row and the mobile card so we don't drift the per-status logic. */
+function JobActions({ job }: { job: Job }) {
+  return (
+    <div className="flex flex-nowrap items-center justify-end gap-2">
+      {job.status !== "queued" && (
+        <div className="tooltip tooltip-left" data-tip="Details">
+          <button
+            type="button"
+            className="btn btn-ghost btn-circle btn-sm"
+            aria-label="Details"
+          >
+            <img src={infoIcon} alt="" className="size-6" />
+          </button>
+        </div>
+      )}
+      <div className="tooltip tooltip-left" data-tip="Redo">
+        <button
+          type="button"
+          className="btn btn-ghost btn-circle btn-sm"
+          aria-label="Redo"
+        >
+          <img src={redoIcon} alt="" className="size-6" />
+        </button>
+      </div>
+      {(job.status === "queued" || job.status === "running") && (
+        <div className="tooltip tooltip-left" data-tip="Cancel">
+          <button
+            type="button"
+            className="btn btn-ghost btn-circle btn-sm"
+            aria-label="Cancel"
+          >
+            <img src={cancelIcon} alt="" className="size-6" />
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
 
 function JobsPage() {
   const { userId } = useAuth();
@@ -54,86 +94,83 @@ function JobsPage() {
             </Link>
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Job ID</th>
-                  <th>Tool</th>
-                  <th>Status</th>
-                  <th>Submitted</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                {jobs.map((job) => {
-                  const status = STATUS_BADGE[job.status];
-                  const toolName =
-                    getSchema(job.schemaId)?.name ?? job.schemaId;
-                  return (
-                    <tr key={job.id}>
-                      <td className="font-mono text-xs">{job.id}</td>
-                      <td>{toolName}</td>
-                      <td>
-                        <span className={`badge ${status.className}`}>
-                          {status.label}
-                        </span>
-                      </td>
-                      <td className="text-base-content/60 whitespace-nowrap">
-                        {relativeTime(job.createdAt)}
-                      </td>
-                      <td className="text-right">
-                        <div className="flex flex-nowrap items-center justify-end gap-2">
-                          {job.status !== "queued" && (
-                            <div
-                              className="tooltip tooltip-left"
-                              data-tip="Details"
-                            >
-                              <button
-                                type="button"
-                                className="btn btn-ghost btn-circle btn-sm"
-                                aria-label="Details"
-                              >
-                                <img src={infoIcon} alt="" className="size-6" />
-                              </button>
-                            </div>
-                          )}
-                          <div className="tooltip tooltip-left" data-tip="Redo">
-                            <button
-                              type="button"
-                              className="btn btn-ghost btn-circle btn-sm"
-                              aria-label="Redo"
-                            >
-                              <img src={redoIcon} alt="" className="size-6" />
-                            </button>
-                          </div>
-                          {(job.status === "queued" ||
-                            job.status === "running") && (
-                            <div
-                              className="tooltip tooltip-left"
-                              data-tip="Cancel"
-                            >
-                              <button
-                                type="button"
-                                className="btn btn-ghost btn-circle btn-sm"
-                                aria-label="Cancel"
-                              >
-                                <img
-                                  src={cancelIcon}
-                                  alt=""
-                                  className="size-6"
-                                />
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+          <>
+            {/* Mobile: card-per-row.  The desktop table doesn't fit
+             *  under ~700px once the UUID + actions are in. */}
+            <ul className="space-y-3 md:hidden">
+              {jobs.map((job) => {
+                const status = STATUS_BADGE[job.status];
+                const toolName =
+                  getSchema(job.schemaId)?.name ?? job.schemaId;
+                return (
+                  <li
+                    key={job.id}
+                    className="bg-base-100 border-base-300 rounded-box border p-4 shadow-sm"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="font-semibold">{toolName}</p>
+                        <p
+                          className="text-base-content/60 mt-1 font-mono text-xs"
+                          title={job.id}
+                        >
+                          {job.id.slice(0, 8)}…
+                        </p>
+                        <p className="text-base-content/60 mt-1 text-sm">
+                          {relativeTime(job.createdAt)}
+                        </p>
+                      </div>
+                      <span className={`badge shrink-0 ${status.className}`}>
+                        {status.label}
+                      </span>
+                    </div>
+                    <div className="mt-3 flex justify-end">
+                      <JobActions job={job} />
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+
+            {/* Desktop: tabular view. */}
+            <div className="hidden overflow-x-auto md:block">
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>Job ID</th>
+                    <th>Tool</th>
+                    <th>Status</th>
+                    <th>Submitted</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {jobs.map((job) => {
+                    const status = STATUS_BADGE[job.status];
+                    const toolName =
+                      getSchema(job.schemaId)?.name ?? job.schemaId;
+                    return (
+                      <tr key={job.id}>
+                        <td className="font-mono text-xs">{job.id}</td>
+                        <td>{toolName}</td>
+                        <td>
+                          <span className={`badge ${status.className}`}>
+                            {status.label}
+                          </span>
+                        </td>
+                        <td className="text-base-content/60 whitespace-nowrap">
+                          {relativeTime(job.createdAt)}
+                        </td>
+                        <td className="text-right">
+                          <JobActions job={job} />
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </>
         )}
       </div>
     </div>
