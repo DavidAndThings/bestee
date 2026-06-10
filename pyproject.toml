@@ -1,0 +1,10 @@
+# Bestee monorepo root.
+#
+# This file declares the uv workspace; each member ships its own
+# pyproject.toml under compute/ and chat/.  Run `uv sync` here to
+# create a single .venv at the root with every Python package
+# installed editable.  The TypeScript UI under ui/ is independent
+# (managed by npm/vite) and not part of this workspace.
+
+[tool.uv.workspace]
+members = ["compute", "chat"]
