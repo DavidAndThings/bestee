@@ -30,7 +30,7 @@ function Card({
 }: CardProps) {
   return (
     <div className="card bg-base-100 min-h-72 shadow-md transition-shadow hover:shadow-xl">
-      <figure className="bg-base-200 h-40">
+      <figure className="bg-base-200 relative h-40 overflow-hidden">
         {imageUrl ? (
           <img
             src={imageUrl}
@@ -44,14 +44,14 @@ function Card({
             <span className="text-base-content/40 text-sm">Image</span>
           </div>
         )}
+        {badge && (
+          <span className="badge badge-primary absolute top-3 right-3 shadow-sm">
+            {badge}
+          </span>
+        )}
       </figure>
       <div className="card-body">
-        <div className="flex items-start justify-between gap-2">
-          <h2 className="card-title text-2xl">{title}</h2>
-          {badge && (
-            <span className="badge badge-primary badge-outline">{badge}</span>
-          )}
-        </div>
+        <h2 className="card-title text-2xl">{title}</h2>
         <p className="text-base-content/70">{description}</p>
         <div className="card-actions mt-2 justify-end">
           <div className="tooltip" data-tip="Like">
