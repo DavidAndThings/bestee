@@ -1,9 +1,13 @@
 import { Show } from "@clerk/react";
-import { Link, Outlet } from "react-router-dom";
+import { Link, Outlet, useLocation } from "react-router-dom";
+import ErrorBoundary from "./components/ErrorBoundary";
 import UserMenu from "./components/UserMenu";
 import openSign from "./assets/icons/open-sign.svg";
 
 function Layout() {
+  // Re-mount the ErrorBoundary on navigation so a captured error
+  // doesn't stay sticky when the user moves to a different route.
+  const location = useLocation();
   return (
     <div className="flex h-dvh flex-col">
       <div className="navbar bg-base-100 shadow-sm px-0 shrink-0">
@@ -31,7 +35,9 @@ function Layout() {
       </div>
 
       <main className="min-h-0 flex-1 overflow-y-auto">
-        <Outlet />
+        <ErrorBoundary key={location.pathname}>
+          <Outlet />
+        </ErrorBoundary>
       </main>
     </div>
   );
