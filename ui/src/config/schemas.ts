@@ -10,7 +10,7 @@ export type ButtonVariant =
   | "btn-warning"
   | "btn-error";
 
-export type FieldType = "string" | "integer" | "array";
+export type FieldType = "string" | "integer" | "date" | "array";
 
 export type FieldDef = {
   type: FieldType;
@@ -74,39 +74,44 @@ const RELATIVE_ROTATION_GRAPH_SCHEMA: Schema = {
   },
 };
 
-const PORTFOLIO_BACKTEST_SCHEMA: Schema = {
-  id: "portfolio-backtest",
-  name: "Portfolio Backtest",
+const TRAINING_DATA_SELECTION_SCHEMA: Schema = {
+  id: "training-data-selection",
+  name: "Training Data Selection",
   description:
-    "Backtest a weighted portfolio of securities over historical data.",
-  badge: "Portfolio",
+    "Select the training data to use for model training. Currently this process is optimized for training on a random forest trading model.",
+  badge: "Training",
   imageUrl: paperMoney,
   buttonVariant: "btn-secondary",
   parameters: {
-    portfolio_name: {
+    lookback_window_start: {
+      type: "date",
+      description: "The start date of the lookback window.",
+    },
+    lookback_window_end: {
+      type: "date",
+      description: "The end date of the lookback window.",
+    },
+    lookback_period: {
       type: "string",
-      description: "A name for this backtest.",
+      description: "The period to use for lookback.",
+      choices: ["daily", "weekly", "monthly"],
     },
-    securities: {
-      type: "array",
-      items: {
-        type: "string",
-      },
-      description: "The securities to include in the portfolio.",
-    },
-    initial_capital: {
-      type: "integer",
-      description: "The starting capital for the backtest, in whole dollars.",
-    },
-    rebalance_frequency: {
+    distance_metric: {
       type: "string",
       description:
-        "How often to rebalance the portfolio back to target weights.",
-      choices: ["daily", "weekly", "monthly", "quarterly"],
+        "The metric to use to quantify the distance between two securities.",
+      choices: ["linearized_percent_return_correlation"],
     },
-    lookback_window: {
-      type: "integer",
-      description: "How many periods of history to use when sizing positions.",
+    linkage_method: {
+      type: "string",
+      description: "The linkage method to use for agglomerative clustering.",
+      choices: ["ward", "complete", "average", "single"],
+    },
+    representative_selection_method: {
+      type: "string",
+      description:
+        "The representative selection method to use for selecting a representative security from each cluster.",
+      choices: ["Medoid", "Max-Sharpe", "Inverse-Variance Centralizer"],
     },
   },
 };
@@ -118,7 +123,7 @@ const PORTFOLIO_BACKTEST_SCHEMA: Schema = {
  */
 export const SCHEMA_REGISTRY: Schema[] = [
   RELATIVE_ROTATION_GRAPH_SCHEMA,
-  PORTFOLIO_BACKTEST_SCHEMA,
+  TRAINING_DATA_SELECTION_SCHEMA,
 ];
 
 export function getSchema(id: string | undefined): Schema | undefined {
@@ -126,4 +131,4 @@ export function getSchema(id: string | undefined): Schema | undefined {
   return SCHEMA_REGISTRY.find((schema) => schema.id === id);
 }
 
-export { RELATIVE_ROTATION_GRAPH_SCHEMA, PORTFOLIO_BACKTEST_SCHEMA };
+export { RELATIVE_ROTATION_GRAPH_SCHEMA, TRAINING_DATA_SELECTION_SCHEMA };

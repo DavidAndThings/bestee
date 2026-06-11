@@ -1,7 +1,7 @@
 import { type FormEvent, useMemo, useState } from "react";
 import { useAuth } from "@clerk/react";
 import { Link, Navigate, useParams } from "react-router-dom";
-import { getSchema, type FieldDef } from "../config/schemas";
+import { getSchema, type FieldDef, type FieldType } from "../config/schemas";
 import { humanizeKey } from "../lib/format";
 import { jobsApi } from "../services/jobsApi";
 
@@ -23,6 +23,13 @@ function parseArray(raw: string): string[] {
     .split(/[\n,]+/)
     .map((item) => item.trim())
     .filter(Boolean);
+}
+
+/** The HTML input `type` for a free-entry (non-array, non-choice) field. */
+function inputType(type: FieldType): string {
+  if (type === "integer") return "number";
+  if (type === "date") return "date";
+  return "text";
 }
 
 function coerceValue(
@@ -50,6 +57,17 @@ function coerceValue(
       return { error: `${humanizeKey(key)} must be a whole number.` };
     }
     return { value: number };
+  }
+
+  if (def.type === "date") {
+    // A native date input yields an ISO yyyy-mm-dd string.
+    if (
+      !/^\d{4}-\d{2}-\d{2}$/.test(trimmed) ||
+      Number.isNaN(Date.parse(trimmed))
+    ) {
+      return { error: `${humanizeKey(key)} must be a valid date.` };
+    }
+    return { value: trimmed };
   }
 
   if (def.choices && !def.choices.includes(trimmed)) {
@@ -211,7 +229,7 @@ function ChartSetupPage() {
                     <input
                       id={id}
                       autoFocus={autoFocus}
-                      type={def.type === "integer" ? "number" : "text"}
+                      type={inputType(def.type)}
                       step={def.type === "integer" ? 1 : undefined}
                       className={`input input-bordered w-full ${
                         error ? "input-error" : ""
