@@ -7,7 +7,7 @@
 
 PY := compute chat
 
-.PHONY: help sync test lint fmt typecheck check ui-install ui-dev ui-lint ui-build ui-preview
+.PHONY: help sync test lint fmt typecheck check ui-install ui-dev ui-build ui-preview
 
 help:  ## List available targets
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -19,8 +19,9 @@ sync:  ## Install/sync deps for every Python package
 test:  ## Run the Python test suites
 	@for p in $(PY); do echo "==> pytest ($$p)"; (cd $$p && uv run pytest -q); done
 
-lint:  ## ruff check every Python package
+lint:  ## Lint everything: ruff (compute, chat) + eslint (ui)
 	@for p in $(PY); do echo "==> ruff check ($$p)"; (cd $$p && uv run ruff check .); done
+	@echo "==> eslint (ui)"; (cd ui && npm run lint)
 
 fmt:  ## ruff format every Python package
 	@for p in $(PY); do echo "==> ruff format ($$p)"; (cd $$p && uv run ruff format .); done
@@ -35,9 +36,6 @@ ui-install:  ## npm install in ui/
 
 ui-dev:  ## start the UI dev server (Vite)
 	cd ui && npm run dev
-
-ui-lint:  ## eslint the UI
-	cd ui && npm run lint
 
 ui-build:  ## type-check + build the UI
 	cd ui && npm run build
