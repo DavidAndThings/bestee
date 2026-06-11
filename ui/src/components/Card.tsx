@@ -28,6 +28,9 @@ function Card({
   onFavourite,
   favourited = false,
 }: CardProps) {
+  const favouriteLabel = favourited
+    ? "Remove from favourites"
+    : "Add to favourites";
   return (
     <div className="card bg-base-100 min-h-72 shadow-md transition-shadow hover:shadow-xl">
       <figure className="bg-base-200 relative h-40 overflow-hidden">
@@ -44,14 +47,17 @@ function Card({
             <span className="text-base-content/40 text-sm">Image</span>
           </div>
         )}
-        <div className="tooltip absolute top-3 left-3" data-tip="Like">
+        <div
+          className="tooltip absolute top-3 left-3"
+          data-tip={favouriteLabel}
+        >
           <button
             type="button"
             className={`btn btn-circle btn-sm bg-base-100/80 hover:bg-base-100 border-0 shadow-sm backdrop-blur-sm${
               favourited ? " text-error" : ""
             }`}
             onClick={() => onFavourite?.()}
-            aria-label="Like"
+            aria-label={favouriteLabel}
             aria-pressed={favourited}
           >
             <svg
