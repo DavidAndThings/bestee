@@ -18,6 +18,12 @@ type HomeCard = {
 
 const FAVOURITES_KEY = "bestee:favourites";
 
+/** Every card id, in declared order (schemas first, then Job Status). */
+const ALL_CARD_IDS = [
+  ...SCHEMA_REGISTRY.map((schema) => schema.id),
+  "job-status",
+];
+
 /** Read the persisted favourite ids (browser-local), defaulting to none. */
 function loadFavourites(): Set<string> {
   try {
@@ -30,12 +36,27 @@ function loadFavourites(): Set<string> {
   }
 }
 
+/** Card order for this visit: favourites first, declared order otherwise.
+ * Captured once on load so toggling a heart doesn't reshuffle the grid mid-
+ * session — the updated order only takes effect on the next load/refresh. */
+function initialOrder(): string[] {
+  const favs = loadFavourites();
+  return [...ALL_CARD_IDS].sort((a, b) => {
+    const aFav = favs.has(a) ? 1 : 0;
+    const bFav = favs.has(b) ? 1 : 0;
+    return bFav - aFav;
+  });
+}
+
 function App() {
   const navigate = useNavigate();
   const { isSignedIn } = useAuth();
   const [favourites, setFavourites] = useState<Set<string>>(loadFavourites);
+  // Frozen for the session; recomputed only on the next mount/refresh, so
+  // favouriting reorders the grid on the *next* visit, not immediately.
+  const [orderedIds] = useState<string[]>(initialOrder);
 
-  // Persist favourites so they survive reloads.
+  // Persist favourites so the next visit can order by them.
   useEffect(() => {
     try {
       localStorage.setItem(FAVOURITES_KEY, JSON.stringify([...favourites]));
@@ -86,13 +107,10 @@ function App() {
     },
   ];
 
-  // Favourites first. Original order is preserved within each group because
-  // Array.prototype.sort is stable.
-  const orderedCards = [...cards].sort((a, b) => {
-    const aFav = favourites.has(a.id) ? 1 : 0;
-    const bFav = favourites.has(b.id) ? 1 : 0;
-    return bFav - aFav;
-  });
+  // Render in the order captured at load (see initialOrder).
+  const orderedCards = [...cards].sort(
+    (a, b) => orderedIds.indexOf(a.id) - orderedIds.indexOf(b.id),
+  );
 
   return (
     <div className="py-8">
