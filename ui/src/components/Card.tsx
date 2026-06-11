@@ -48,7 +48,7 @@ function Card({
           </div>
         )}
         <div
-          className="tooltip absolute top-3 left-3"
+          className="tooltip tooltip-right absolute top-3 left-3"
           data-tip={favouriteLabel}
         >
           <button
