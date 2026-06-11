@@ -7,7 +7,7 @@
 
 PY := compute chat
 
-.PHONY: help sync test lint fmt typecheck check ui-install ui-lint ui-build
+.PHONY: help sync test lint fmt typecheck check ui-install ui-dev ui-lint ui-build ui-preview
 
 help:  ## List available targets
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -33,8 +33,14 @@ check: lint typecheck test  ## Lint + type-check + test (what CI runs)
 ui-install:  ## npm install in ui/
 	cd ui && npm install
 
+ui-dev:  ## start the UI dev server (Vite)
+	cd ui && npm run dev
+
 ui-lint:  ## eslint the UI
 	cd ui && npm run lint
 
 ui-build:  ## type-check + build the UI
 	cd ui && npm run build
+
+ui-preview:  ## preview the production build of the UI
+	cd ui && npm run preview
