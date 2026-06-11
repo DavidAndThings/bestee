@@ -1,13 +1,23 @@
-name: CI
+name: compute
 
+# Path-filtered: runs only when the compute package (or this workflow) changes.
 on:
   push:
     branches: [main]
+    paths:
+      - "compute/**"
+      - ".github/workflows/compute.yml"
   pull_request:
+    paths:
+      - "compute/**"
+      - ".github/workflows/compute.yml"
 
 jobs:
-  check:
+  compute:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: compute
     steps:
       - uses: actions/checkout@v4
 
@@ -15,12 +25,13 @@ jobs:
         uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
+          cache-dependency-glob: compute/uv.lock
 
       - name: Set up Python
         run: uv python install
 
       - name: Install dependencies
-        run: uv sync --all-extras --dev
+        run: uv sync
 
       - name: Lint
         run: uv run ruff check .
@@ -28,8 +39,8 @@ jobs:
       - name: Format check
         run: uv run ruff format --check .
 
-      - name: Type check (compute)
-        run: cd compute && uv run ty check
+      - name: Type check
+        run: uv run ty check
 
       - name: Test
         run: uv run pytest -q

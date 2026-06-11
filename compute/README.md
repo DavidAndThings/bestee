@@ -79,4 +79,4 @@ uv run ruff format .    # format
 uv run ty check         # type check
 ```
 
-CI runs the same checks on push/PR (`.github/workflows/ci.yml`).
+CI runs the same checks on push/PR (`.github/workflows/compute.yml`).

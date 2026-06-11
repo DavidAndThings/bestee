@@ -1,0 +1,46 @@
+name: chat
+
+# Path-filtered: runs only when the chat package (or this workflow) changes.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "chat/**"
+      - ".github/workflows/chat.yml"
+  pull_request:
+    paths:
+      - "chat/**"
+      - ".github/workflows/chat.yml"
+
+jobs:
+  chat:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: chat
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: chat/uv.lock
+
+      - name: Set up Python
+        run: uv python install
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Lint
+        run: uv run ruff check .
+
+      - name: Format check
+        run: uv run ruff format --check .
+
+      - name: Type check
+        run: uv run ty check
+
+      - name: Test
+        run: uv run pytest -q

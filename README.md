@@ -11,21 +11,28 @@ Bestee is a small set of cooperating projects:
 
 ## Layout
 
-This is a **uv workspace**: the root `pyproject.toml` lists `compute` and `chat`
-as members, and `uv sync` at the root sets up a single `.venv` with both packages
-installed editable. Each package keeps its own `pyproject.toml`, tests, and
-console scripts under its subdirectory.
+Each project is self-contained — there is **no Python project at the repository
+root**. `compute/` and `chat/` are independent [uv](https://docs.astral.sh/uv/)
+projects, each with its own `pyproject.toml`, `uv.lock`, and `.venv`; `ui/` is a
+standalone npm/Vite app. They share nothing but this directory and a few
+repo-wide config files (`.pre-commit-config.yaml`, the CI workflows,
+`.gitignore`).
 
-The TypeScript UI lives alongside the Python packages but is managed independently
-(`cd ui && npm install`).
+A top-level `Makefile` fans the common commands out across the two Python
+packages so you rarely need to `cd` into each.
 
 ## Getting started
 
 ```bash
-uv sync               # creates .venv with bestee-compute + bestee-chat
-uv run pytest compute # tests for the compute package
-uv run pytest chat    # tests for the chat package
-cd ui && npm install && npm run dev   # local UI
+make sync     # uv sync in compute + chat
+make test     # pytest in compute + chat
+make check    # lint + type-check + test (what CI runs)
+make help     # list every target
+
+# …or drive a single project directly:
+cd compute && uv sync && uv run pytest
+cd chat    && uv sync && uv run pytest
+cd ui      && npm install && npm run dev
 ```
 
 ## Per-package READMEs
