@@ -13,7 +13,7 @@ TICKER = "Ticker"
 EXCHANGE = "Exchange"
 ACTIVE = "Active"
 
-# ── Ticker details (see bestee_compute.stocks.tickers._DETAIL_FIELDS) ───────
+# ── Ticker details (see bestee_compute.stocks.tickers.DETAIL_FIELDS) ────────
 NAME = "Name"
 DESCRIPTION = "Description"
 TYPE = "Type"
@@ -34,7 +34,3 @@ LIST_DATE = "List Date"
 HOMEPAGE_URL = "Homepage URL"
 PHONE_NUMBER = "Phone Number"
 TICKER_ROOT = "Ticker Root"
-
-# ── SIC codes table (see bestee_compute.stocks.sic) ──────────────────────────
-INDUSTRY_TITLE = "Industry Title"
-OFFICE = "Office"

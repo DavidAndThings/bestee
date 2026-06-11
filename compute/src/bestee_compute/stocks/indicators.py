@@ -127,3 +127,27 @@ def simple_moving_average(
     # SMA over a 1-bar window is the identity; TA-Lib rejects timeperiod < 2.
     sma = arr if period == 1 else talib.SMA(arr, timeperiod=period)
     return [None if np.isnan(v) else float(v) for v in sma]
+
+
+def rsquared_trend(series: Sequence[float]) -> float | None:
+    """R² of a least-squares linear fit of *series* against its index.
+
+    Equivalent to the squared Pearson correlation between the bar index
+    (0, 1, 2, …) and the value at that bar.  A linear trend scores 1.0;
+    a flat or noisy series scores near 0.  Returns ``None`` for series
+    too short (< 2 valid points after dropping NaNs) or with zero
+    variance.  NaN-padded warmup from upstream indicators is dropped so
+    R² can be applied to an RSI or SMA series cleanly.
+    """
+    arr = np.asarray(series, dtype=np.float64)
+    valid = ~np.isnan(arr)
+    if int(valid.sum()) < 2:
+        return None
+    xs = np.arange(arr.size, dtype=np.float64)[valid]
+    ys = arr[valid]
+    if float(ys.var()) == 0.0:
+        return None
+    r = np.corrcoef(xs, ys)[0, 1]
+    if not np.isfinite(r):
+        return None
+    return float(r * r)

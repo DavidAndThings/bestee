@@ -34,6 +34,7 @@ from bestee_compute.stocks import expressions
 from bestee_compute.stocks.financials import build_financials_df
 from bestee_compute.stocks.indicators import (
     relative_strength_index,
+    rsquared_trend,
     simple_moving_average,
     stochastic_oscillator,
 )
@@ -44,7 +45,11 @@ from bestee_compute.stocks.models import (
     Stock,
     TimeSeriesDef,
 )
-from bestee_compute.stocks.tickers import get_all_tickers_df, get_ticker_details_df
+from bestee_compute.stocks.tickers import (
+    DETAIL_FIELDS,
+    get_all_tickers_df,
+    get_ticker_details_df,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -95,41 +100,16 @@ class KnowledgeBaseDecorator(ABC):
 # ── Source stage ─────────────────────────────────────────────────────
 
 
-# DataFrame column → Stock attribute name.  Mirrors tickers._DETAIL_FIELDS
-# but goes the other direction (the details DataFrame uses cols.* labels;
-# we turn each row into a Stock).
-_STOCK_CATEGORICAL_FIELDS: dict[str, str] = {
-    cols.NAME: "name",
-    cols.DESCRIPTION: "description",
-    cols.TYPE: "type",
-    cols.MARKET: "market",
-    cols.LOCALE: "locale",
-    cols.PRIMARY_EXCHANGE: "primary_exchange",
-    cols.CURRENCY: "currency_name",
-    cols.CIK: "cik",
-    cols.COMPOSITE_FIGI: "composite_figi",
-    cols.SHARE_CLASS_FIGI: "share_class_figi",
-    cols.SIC_CODE: "sic_code",
-    cols.SIC_DESCRIPTION: "sic_description",
-    cols.MARKET_CAP: "market_cap",
-    cols.SHARES_OUTSTANDING: "share_class_shares_outstanding",
-    cols.WEIGHTED_SHARES_OUTSTANDING: "weighted_shares_outstanding",
-    cols.TOTAL_EMPLOYEES: "total_employees",
-    cols.LIST_DATE: "list_date",
-    cols.HOMEPAGE_URL: "homepage_url",
-    cols.PHONE_NUMBER: "phone_number",
-    cols.TICKER_ROOT: "ticker_root",
-}
-
-
 def _stock_from_row(row: Mapping[str, Any]) -> Stock | None:
-    """Build a :class:`Stock` from one ticker-details DataFrame row."""
-    ticker = row.get(cols.TICKER)
-    if ticker is None:
+    """Build a :class:`Stock` from one ticker-details DataFrame row.
+
+    Reuses :data:`~bestee_compute.stocks.tickers.DETAIL_FIELDS` (the same
+    schema the details DataFrame is built from) to map each column label
+    back to its ``Stock`` attribute, so the two never drift apart.
+    """
+    if row.get(cols.TICKER) is None:
         return None
-    kwargs: dict[str, Any] = {"ticker": ticker}
-    for col_name, attr in _STOCK_CATEGORICAL_FIELDS.items():
-        kwargs[attr] = row.get(col_name)
+    kwargs: dict[str, Any] = {attr: row.get(label) for attr, label in DETAIL_FIELDS}
     return Stock(**kwargs)
 
 
@@ -434,32 +414,8 @@ class TimeSeriesCacheDecorator(KnowledgeBaseDecorator):
 type TimeSeriesScalarMetric = Callable[[Sequence[float]], float | None]
 
 
-def _rsquared_trend(series: Sequence[float]) -> float | None:
-    """R² of a least-squares linear fit of *series* against its index.
-
-    Equivalent to the squared Pearson correlation between the bar index
-    (0, 1, 2, …) and the value at that bar.  A linear trend scores 1.0;
-    a flat or noisy series scores near 0.  Returns ``None`` for series
-    too short (< 2 valid points after dropping NaNs) or with zero
-    variance.  NaN-padded warmup from upstream indicators is dropped so
-    R² can be applied to an RSI or SMA series cleanly.
-    """
-    arr = np.asarray(series, dtype=np.float64)
-    valid = ~np.isnan(arr)
-    if int(valid.sum()) < 2:
-        return None
-    xs = np.arange(arr.size, dtype=np.float64)[valid]
-    ys = arr[valid]
-    if float(ys.var()) == 0.0:
-        return None
-    r = np.corrcoef(xs, ys)[0, 1]
-    if not np.isfinite(r):
-        return None
-    return float(r * r)
-
-
 _TIME_SERIES_METRICS: dict[str, TimeSeriesScalarMetric] = {
-    "RSquared": _rsquared_trend,
+    "RSquared": rsquared_trend,
 }
 
 

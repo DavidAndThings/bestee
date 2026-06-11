@@ -13,9 +13,11 @@ from bestee_compute.stocks import columns as cols
 
 logger = logging.getLogger(__name__)
 
-# Fields to extract from TickerDetails, in display order.
-# Each tuple is (attribute_name_on_SDK_model, column_label_in_table).
-_DETAIL_FIELDS: list[tuple[str, str]] = [
+# Fields to extract from TickerDetails, in display order.  Each tuple is
+# (attribute_name_on_SDK_model, column_label_in_table).  The SDK attribute
+# names match the Stock dataclass fields, so the decorator pipeline reuses
+# this to rebuild a Stock from a details row (label -> attribute).
+DETAIL_FIELDS: list[tuple[str, str]] = [
     ("ticker", cols.TICKER),
     ("name", cols.NAME),
     ("description", cols.DESCRIPTION),
@@ -258,7 +260,7 @@ def get_ticker_details_df(
     rows: list[dict[str, str | None]] = []
     for det in details:
         row: dict[str, str | None] = {}
-        for attr, label in _DETAIL_FIELDS:
+        for attr, label in DETAIL_FIELDS:
             value = getattr(det, attr, None)
             if isinstance(value, float):
                 row[label] = f"{value:,.0f}"
@@ -273,7 +275,7 @@ def get_ticker_details_df(
     # this, polars infers from the first few rows — if those rows are
     # null for a column it guesses the wrong dtype and chokes when a
     # later row finally has a string value.
-    schema = {label: pl.Utf8 for _, label in _DETAIL_FIELDS}
+    schema = {label: pl.Utf8 for _, label in DETAIL_FIELDS}
     return pl.DataFrame(rows, schema=schema)
 
 
@@ -308,7 +310,7 @@ def get_ticker_details(
         RuntimeError: If no API key is available.
     """
     df = get_ticker_details_df(tickers, api_key=api_key, max_workers=max_workers)
-    detail_cols = [label for _, label in _DETAIL_FIELDS]
+    detail_cols = [label for _, label in DETAIL_FIELDS]
 
     logger.info("Built ticker details GT table")
     return (

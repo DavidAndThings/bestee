@@ -687,25 +687,25 @@ class TestTimeSeriesMetricDecorator:
 
 class TestRSquaredTrend:
     def test_perfect_linear_trend_is_one(self) -> None:
-        from bestee_compute.stocks.decorators import _rsquared_trend
+        from bestee_compute.stocks.indicators import rsquared_trend
 
-        assert _rsquared_trend([3.0, 5.0, 7.0, 9.0, 11.0]) == pytest.approx(1.0)
+        assert rsquared_trend([3.0, 5.0, 7.0, 9.0, 11.0]) == pytest.approx(1.0)
 
     def test_constant_series_is_none(self) -> None:
-        from bestee_compute.stocks.decorators import _rsquared_trend
+        from bestee_compute.stocks.indicators import rsquared_trend
 
-        assert _rsquared_trend([5.0, 5.0, 5.0]) is None
+        assert rsquared_trend([5.0, 5.0, 5.0]) is None
 
     def test_too_short_is_none(self) -> None:
-        from bestee_compute.stocks.decorators import _rsquared_trend
+        from bestee_compute.stocks.indicators import rsquared_trend
 
-        assert _rsquared_trend([]) is None
-        assert _rsquared_trend([1.0]) is None
+        assert rsquared_trend([]) is None
+        assert rsquared_trend([1.0]) is None
 
     def test_noisy_series_under_one(self) -> None:
-        from bestee_compute.stocks.decorators import _rsquared_trend
+        from bestee_compute.stocks.indicators import rsquared_trend
 
-        r2 = _rsquared_trend([1.0, 5.0, 3.0, 8.0, 6.0, 10.0])
+        r2 = rsquared_trend([1.0, 5.0, 3.0, 8.0, 6.0, 10.0])
         assert r2 is not None
         assert 0.0 < r2 < 1.0
 
