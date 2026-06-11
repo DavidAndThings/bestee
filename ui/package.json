@@ -12,6 +12,7 @@
   "dependencies": {
     "@clerk/react": "^6.7.3",
     "react": "^19.2.6",
+    "react-day-picker": "^10.0.1",
     "react-dom": "^19.2.6",
     "react-router-dom": "^7.17.0"
   },

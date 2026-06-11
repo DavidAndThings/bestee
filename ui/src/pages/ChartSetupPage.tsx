@@ -4,6 +4,7 @@ import { Link, Navigate, useParams } from "react-router-dom";
 import { getSchema, type FieldDef, type FieldType } from "../config/schemas";
 import { humanizeKey } from "../lib/format";
 import { jobsApi } from "../services/jobsApi";
+import DateField from "../components/DateField";
 
 type FormValues = Record<string, string>;
 type FormErrors = Record<string, string>;
@@ -25,11 +26,10 @@ function parseArray(raw: string): string[] {
     .filter(Boolean);
 }
 
-/** The HTML input `type` for a free-entry (non-array, non-choice) field. */
+/** The HTML input `type` for a free-entry text/number field. `date` fields are
+ * rendered separately with a calendar (see DateField). */
 function inputType(type: FieldType): string {
-  if (type === "integer") return "number";
-  if (type === "date") return "date";
-  return "text";
+  return type === "integer" ? "number" : "text";
 }
 
 function coerceValue(
@@ -140,8 +140,13 @@ function ChartSetupPage() {
     if (!userId || submitState.status === "submitting") return;
 
     const result = buildPayload(schema.parameters, values);
-    setErrors(result.errors);
-    if (Object.keys(result.errors).length > 0) return;
+    const fieldErrors = { ...result.errors };
+    // Cross-field checks only run once every field is individually valid.
+    if (Object.keys(fieldErrors).length === 0 && schema.validate) {
+      Object.assign(fieldErrors, schema.validate(result.payload));
+    }
+    setErrors(fieldErrors);
+    if (Object.keys(fieldErrors).length > 0) return;
 
     setSubmitState({ status: "submitting" });
     try {
@@ -224,6 +229,14 @@ function ChartSetupPage() {
                       value={values[key] ?? ""}
                       placeholder="AAPL, MSFT, GOOG"
                       onChange={(event) => updateValue(key, event.target.value)}
+                    />
+                  ) : def.type === "date" ? (
+                    <DateField
+                      id={id}
+                      value={values[key] ?? ""}
+                      onChange={(next) => updateValue(key, next)}
+                      invalid={!!error}
+                      autoFocus={autoFocus}
                     />
                   ) : (
                     <input

@@ -34,6 +34,11 @@ export type Schema = {
    * which fields are rendered in the chart setup form.
    */
   parameters: Record<string, FieldDef>;
+  /**
+   * Optional cross-field validation, run only once every field passes its own
+   * checks. Returns a map of field key -> error message (empty when valid).
+   */
+  validate?: (payload: Record<string, unknown>) => Record<string, string>;
 };
 
 const RELATIVE_ROTATION_GRAPH_SCHEMA: Schema = {
@@ -113,6 +118,17 @@ const TRAINING_DATA_SELECTION_SCHEMA: Schema = {
         "The representative selection method to use for selecting a representative security from each cluster.",
       choices: ["Medoid", "Max-Sharpe", "Inverse-Variance Centralizer"],
     },
+  },
+  validate: (payload) => {
+    const errors: Record<string, string> = {};
+    const start = payload.lookback_window_start;
+    const end = payload.lookback_window_end;
+    // ISO yyyy-mm-dd strings order chronologically as plain strings.
+    if (typeof start === "string" && typeof end === "string" && start > end) {
+      errors.lookback_window_end =
+        "The end date must be on or after the start date.";
+    }
+    return errors;
   },
 };
 
