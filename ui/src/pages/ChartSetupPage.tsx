@@ -15,6 +15,16 @@ type SubmitState =
   | { status: "success"; jobId: string }
   | { status: "error"; message: string };
 
+// These fields hold tool parameters, never credentials — keep password
+// managers and browser autofill from offering to fill them.
+const noAutofill = {
+  autoComplete: "off",
+  "data-1p-ignore": "true", // 1Password
+  "data-lpignore": "true", // LastPass
+  "data-bwignore": "true", // Bitwarden
+  "data-form-type": "other", // Dashlane
+};
+
 function initialValues(parameters: Record<string, FieldDef>): FormValues {
   return Object.fromEntries(Object.keys(parameters).map((key) => [key, ""]));
 }
@@ -203,6 +213,7 @@ function ChartSetupPage() {
                   {def.choices ? (
                     <select
                       id={id}
+                      {...noAutofill}
                       autoFocus={autoFocus}
                       className={`select select-bordered w-full ${
                         error ? "select-error" : ""
@@ -222,6 +233,7 @@ function ChartSetupPage() {
                   ) : def.type === "array" ? (
                     <textarea
                       id={id}
+                      {...noAutofill}
                       autoFocus={autoFocus}
                       className={`textarea textarea-bordered min-h-28 w-full ${
                         error ? "textarea-error" : ""
@@ -241,6 +253,7 @@ function ChartSetupPage() {
                   ) : (
                     <input
                       id={id}
+                      {...noAutofill}
                       autoFocus={autoFocus}
                       type={inputType(def.type)}
                       step={def.type === "integer" ? 1 : undefined}

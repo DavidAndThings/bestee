@@ -1,0 +1,76 @@
+/* daisyUI theming for the react-day-picker calendar used by DateField.
+ * Imported after `react-day-picker/style.css` so these rules win.  The
+ * `var(--color-*)` / `var(--radius-*)` names are daisyUI v5 theme tokens, so
+ * the calendar tracks whatever theme is active. */
+
+.rdp-root {
+  --rdp-accent-color: var(--color-primary);
+  --rdp-accent-background-color: var(--color-primary);
+  --rdp-today-color: var(--color-primary);
+  --rdp-selected-border: 1px solid var(--color-primary);
+
+  --rdp-day-width: 2.25rem;
+  --rdp-day-height: 2.25rem;
+  --rdp-day_button-width: 2.25rem;
+  --rdp-day_button-height: 2.25rem;
+  --rdp-day_button-border-radius: var(--radius-field, 0.5rem);
+
+  --rdp-nav_button-width: 2rem;
+  --rdp-nav_button-height: 2rem;
+
+  font-size: 0.875rem;
+}
+
+/* Neutral nav chevrons rather than the accent colour. */
+.rdp-root .rdp-chevron {
+  fill: var(--color-base-content);
+}
+
+/* Hover on a selectable day. */
+.rdp-root .rdp-day_button:hover:not(:disabled) {
+  background-color: var(--color-base-200);
+}
+
+/* The selected day: a filled daisyUI-primary chip. */
+.rdp-root .rdp-selected {
+  font-size: inherit;
+}
+.rdp-root .rdp-selected .rdp-day_button {
+  background-color: var(--color-primary);
+  color: var(--color-primary-content);
+  border-color: var(--color-primary);
+  font-weight: 600;
+}
+.rdp-root .rdp-selected .rdp-day_button:hover {
+  background-color: var(--color-primary);
+}
+
+/* Today, when it isn't the selected day. */
+.rdp-root .rdp-today:not(.rdp-selected):not(.rdp-outside) .rdp-day_button {
+  color: var(--color-primary);
+  font-weight: 600;
+}
+
+/* Prev / next month buttons. */
+.rdp-root .rdp-button_previous,
+.rdp-root .rdp-button_next {
+  color: var(--color-base-content);
+  border-radius: var(--radius-field, 0.5rem);
+}
+.rdp-root .rdp-button_previous:hover:not(:disabled),
+.rdp-root .rdp-button_next:hover:not(:disabled) {
+  background-color: var(--color-base-200);
+}
+
+/* Month / year dropdowns styled as compact daisyUI selects. */
+.rdp-root .rdp-dropdown_root {
+  border: 1px solid var(--color-base-300);
+  border-radius: var(--radius-field, 0.5rem);
+  padding: 0.125rem 0.5rem;
+}
+.rdp-root .rdp-dropdown_root:hover {
+  border-color: var(--color-base-content);
+}
+.rdp-root .rdp-month_caption {
+  font-size: 0.95rem;
+}
