@@ -11,6 +11,8 @@ wheels/
 
 # Environment variables
 .env
+.env.local
+.env.*.local
 
 # Testing
 .pytest_cache/
@@ -30,3 +32,8 @@ htmlcov/
 .vscode/
 *.swp
 *.swo
+
+# Generated data and plot artifacts (compute demo scripts)
+compute/scripts/*.parquet
+compute/scripts/*.csv
+compute/scripts/*.png

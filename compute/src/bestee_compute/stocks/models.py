@@ -247,6 +247,19 @@ class CommandHeader(StrEnum):
     SMA = "SMA"
 
 
+class OHLCHeader(StrEnum):
+    """OHLC field names."""
+
+    TIMESTAMP = "Timestamp"
+    OPEN = "Open"
+    HIGH = "High"
+    LOW = "Low"
+    CLOSE = "Close"
+    VOLUME = "Volume"
+    VWAP = "VWAP"
+    TRANSACTIONS = "Transactions"
+
+
 type AliasDescription = FinancialMetric | TimeSeriesDef
 type AliasMap = dict[str, AliasDescription]
 

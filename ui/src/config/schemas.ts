@@ -105,18 +105,40 @@ const TRAINING_DATA_SELECTION_SCHEMA: Schema = {
       type: "string",
       description:
         "The metric to use to quantify the distance between two securities.",
-      choices: ["linearized_percent_return_correlation"],
+      choices: [
+        "Positive Semi-Correlation",
+        "Negative Semi-Correlation",
+        "Mutual Information",
+        "Tail Dependence",
+      ],
     },
     linkage_method: {
       type: "string",
       description: "The linkage method to use for agglomerative clustering.",
       choices: ["ward", "complete", "average", "single"],
     },
+    cluster_selection_method: {
+      type: "string",
+      description:
+        "The method to use for selecting clusters after hierarchical clustering.",
+      choices: [
+        "Maximize Silhouette Score Optimization",
+        "Optimal Number of Clusters (ONC)",
+        "Gap Statistic",
+        "Clest",
+      ],
+    },
     representative_selection_method: {
       type: "string",
       description:
         "The representative selection method to use for selecting a representative security from each cluster.",
-      choices: ["Medoid", "Max-Sharpe", "Inverse-Variance Centralizer"],
+      choices: [
+        "Medoid",
+        "Max-Sharpe",
+        "Inverse-Variance Centralizer",
+        "Anti-Medoid",
+        "Highest Historic Beta",
+      ],
     },
   },
   validate: (payload) => {

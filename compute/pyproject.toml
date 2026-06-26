@@ -6,11 +6,15 @@ readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
     "great-tables>=0.21.0",
+    "hmmlearn>=0.3.3",
     "httpx>=0.28.1",
+    "lightgbm>=4.6.0",
     "massive>=2.7.0",
     "numpy>=2.0",
     "polars>=1.40.1",
+    "pydantic>=2.13.4",
     "python-dotenv>=1.2.2",
+    "scikit-learn>=1.9.0",
     "ta-lib>=0.6.8",
 ]
 
@@ -43,4 +47,5 @@ dev = [
     "ruff>=0.11",
     "ty>=0.0.1",
     "pre-commit>=4.0",
+    "matplotlib>=3.11.0",
 ]
