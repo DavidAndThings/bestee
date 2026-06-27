@@ -23,6 +23,9 @@ class TaskStatus(BaseModel):
     state: str
     result: dict[str, Any] | None = None
     error: str | None = None
+    started_at: str | None = None
+    finished_at: str | None = None
+    elapsed_seconds: float | None = None
 
 
 class JobsPage(BaseModel):

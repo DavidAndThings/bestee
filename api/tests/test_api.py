@@ -95,11 +95,22 @@ def test_rrg_ticker_reference_requires_benchmark() -> None:
     assert response.status_code == 422
 
 
+def _mock_async_result(
+    state: str, result: Any = None, date_done: str | None = None
+) -> MagicMock:
+    ar = MagicMock()
+    ar.state = state
+    ar.result = result
+    ar.date_done = date_done
+    return ar
+
+
 def test_poll_returns_result_when_successful() -> None:
-    async_result = MagicMock()
-    async_result.state = "SUCCESS"
-    async_result.result = {"labels": {"AAA": 0}}
-    with patch("celery_client.AsyncResult", return_value=async_result):
+    ar = _mock_async_result("SUCCESS", result={"labels": {"AAA": 0}})
+    with (
+        patch("celery_client.AsyncResult", return_value=ar),
+        patch("routers.jobs.get_task_start_times", return_value={}),
+    ):
         response = client.get("/jobs/task-123")
     assert response.status_code == 200
     payload = response.json()
@@ -107,13 +118,17 @@ def test_poll_returns_result_when_successful() -> None:
     assert payload["state"] == "SUCCESS"
     assert payload["result"] == {"labels": {"AAA": 0}}
     assert payload["error"] is None
+    assert payload["started_at"] is None
+    assert payload["finished_at"] is None
+    assert payload["elapsed_seconds"] is None
 
 
 def test_poll_returns_error_when_failed() -> None:
-    async_result = MagicMock()
-    async_result.state = "FAILURE"
-    async_result.result = ValueError("boom")
-    with patch("celery_client.AsyncResult", return_value=async_result):
+    ar = _mock_async_result("FAILURE", result=ValueError("boom"))
+    with (
+        patch("celery_client.AsyncResult", return_value=ar),
+        patch("routers.jobs.get_task_start_times", return_value={}),
+    ):
         response = client.get("/jobs/task-123")
     assert response.status_code == 200
     payload = response.json()
@@ -123,16 +138,35 @@ def test_poll_returns_error_when_failed() -> None:
 
 
 def test_poll_returns_state_only_when_pending() -> None:
-    async_result = MagicMock()
-    async_result.state = "PENDING"
-    async_result.result = None
-    with patch("celery_client.AsyncResult", return_value=async_result):
+    ar = _mock_async_result("PENDING")
+    with (
+        patch("celery_client.AsyncResult", return_value=ar),
+        patch("routers.jobs.get_task_start_times", return_value={}),
+    ):
         response = client.get("/jobs/task-456")
     assert response.status_code == 200
     payload = response.json()
     assert payload["state"] == "PENDING"
     assert payload["result"] is None
     assert payload["error"] is None
+
+
+def test_poll_includes_timing_when_start_time_recorded() -> None:
+    ar = _mock_async_result(
+        "SUCCESS",
+        result={"ok": True},
+        date_done="2024-01-01T12:00:10+00:00",
+    )
+    start_times = {"task-999": "2024-01-01T12:00:00+00:00"}
+    with (
+        patch("celery_client.AsyncResult", return_value=ar),
+        patch("routers.jobs.get_task_start_times", return_value=start_times),
+    ):
+        response = client.get("/jobs/task-999")
+    payload = response.json()
+    assert payload["started_at"] == "2024-01-01T12:00:00+00:00"
+    assert payload["finished_at"] == "2024-01-01T12:00:10+00:00"
+    assert payload["elapsed_seconds"] == pytest.approx(10.0)
 
 
 # ---------------------------------------------------------------------------
@@ -153,7 +187,10 @@ def _mock_redis(
 
 
 def test_list_jobs_empty() -> None:
-    with patch("redis_client._redis_client", _mock_redis([])):
+    with (
+        patch("redis_client._redis_client", _mock_redis([])),
+        patch("routers.jobs.get_task_start_times", return_value={}),
+    ):
         response = client.get("/jobs")
     assert response.status_code == 200
     data = response.json()
@@ -169,7 +206,10 @@ def test_list_jobs_returns_all_statuses() -> None:
         json.dumps({"task_id": "aaa", "status": "SUCCESS", "result": {"x": 1}}),
         json.dumps({"task_id": "bbb", "status": "PENDING"}),
     ]
-    with patch("redis_client._redis_client", _mock_redis(keys, mget_vals)):
+    with (
+        patch("redis_client._redis_client", _mock_redis(keys, mget_vals)),
+        patch("routers.jobs.get_task_start_times", return_value={}),
+    ):
         response = client.get("/jobs")
     assert response.status_code == 200
     data = response.json()
@@ -193,7 +233,10 @@ def test_list_jobs_failure_entry_formats_error() -> None:
             }
         )
     ]
-    with patch("redis_client._redis_client", _mock_redis(keys, mget_vals)):
+    with (
+        patch("redis_client._redis_client", _mock_redis(keys, mget_vals)),
+        patch("routers.jobs.get_task_start_times", return_value={}),
+    ):
         response = client.get("/jobs")
     item = response.json()["items"][0]
     assert item["state"] == "FAILURE"
@@ -210,7 +253,10 @@ def test_list_jobs_pagination() -> None:
         json.dumps({"task_id": f"task-{i}", "status": "SUCCESS", "result": {}})
         for i in range(2, 4)
     ]
-    with patch("redis_client._redis_client", _mock_redis(keys, mget_vals)):
+    with (
+        patch("redis_client._redis_client", _mock_redis(keys, mget_vals)),
+        patch("routers.jobs.get_task_start_times", return_value={}),
+    ):
         response = client.get("/jobs?offset=2&limit=2")
     data = response.json()
     assert data["total"] == 5
@@ -229,3 +275,27 @@ def test_list_jobs_rejects_invalid_limit() -> None:
 def test_list_jobs_rejects_limit_above_max() -> None:
     response = client.get("/jobs?limit=101")
     assert response.status_code == 422
+
+
+def test_list_jobs_includes_timing_when_start_time_recorded() -> None:
+    keys = ["celery-task-meta-task-abc"]
+    mget_vals = [
+        json.dumps(
+            {
+                "task_id": "task-abc",
+                "status": "SUCCESS",
+                "result": {},
+                "date_done": "2024-01-01T12:00:05+00:00",
+            }
+        )
+    ]
+    start_times = {"task-abc": "2024-01-01T12:00:00+00:00"}
+    with (
+        patch("redis_client._redis_client", _mock_redis(keys, mget_vals)),
+        patch("routers.jobs.get_task_start_times", return_value=start_times),
+    ):
+        response = client.get("/jobs")
+    item = response.json()["items"][0]
+    assert item["started_at"] == "2024-01-01T12:00:00+00:00"
+    assert item["finished_at"] == "2024-01-01T12:00:05+00:00"
+    assert item["elapsed_seconds"] == pytest.approx(5.0)

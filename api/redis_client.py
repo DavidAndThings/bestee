@@ -14,6 +14,7 @@ import redis
 from dotenv import load_dotenv
 
 _KEY_PREFIX = "celery-task-meta-"
+_START_KEY_PREFIX = "celery-task-started-"
 
 
 def _build_redis_client() -> redis.Redis:
@@ -38,6 +39,19 @@ def list_all_task_ids() -> list[str]:
     """
     keys: list[str] = list(_redis_client.scan_iter(f"{_KEY_PREFIX}*"))
     return sorted(k[len(_KEY_PREFIX) :] for k in keys)
+
+
+def get_task_start_times(task_ids: list[str]) -> dict[str, str]:
+    """Fetch start timestamps recorded by the ``task_prerun`` worker signal.
+
+    Returns a mapping of task id → ISO UTC string for tasks that have started;
+    tasks that are still pending (or whose key has expired) are omitted.
+    """
+    if not task_ids:
+        return {}
+    keys = [f"{_START_KEY_PREFIX}{tid}" for tid in task_ids]
+    values: list[Any] = cast(list[Any], _redis_client.mget(keys))
+    return {tid: raw for tid, raw in zip(task_ids, values) if raw is not None}
 
 
 def get_task_metas(task_ids: list[str]) -> list[dict[str, Any]]:
