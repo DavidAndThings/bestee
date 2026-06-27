@@ -43,6 +43,13 @@ repos:
         types: [python]
         files: ^queue/
         pass_filenames: false
+      - id: ty-api
+        name: ty check (api)
+        entry: bash -c 'cd api && uvx ty check'
+        language: system
+        types: [python]
+        files: ^api/
+        pass_filenames: false
       - id: eslint-ui
         name: eslint (ui)
         entry: bash -c 'cd ui && npm run lint'

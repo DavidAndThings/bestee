@@ -1,9 +1,35 @@
 [project]
 name = "api"
 version = "0.1.0"
-description = "Add your description here"
+description = "FastAPI producer that enqueues the bestee-compute tuning jobs onto the Celery queue."
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
+    "celery[redis]>=5.6.3",
     "fastapi>=0.138.0",
+    "python-dotenv>=1.0.1",
+    "uvicorn[standard]>=0.30",
+]
+
+[tool.ruff]
+src = ["."]
+line-length = 88
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP"]
+
+[tool.ty.rules]
+possibly-unresolved-reference = "warn"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28",
+    "pre-commit>=4.0",
+    "pytest>=8.0",
+    "ruff>=0.11",
+    "ty>=0.0.1",
 ]
