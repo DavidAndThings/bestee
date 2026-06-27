@@ -106,7 +106,14 @@ def get_job(task_id: str) -> TaskStatus:
     result = get_result(task_id)
     state = result.state
     started_at = get_task_start_times([task_id]).get(task_id)
-    finished_at: str | None = result.date_done
+    # Celery's date_done property calls isoparse() and returns datetime | None.
+    date_done = result.date_done
+    if isinstance(date_done, str):
+        finished_at: str | None = date_done
+    elif date_done is not None:
+        finished_at = date_done.isoformat()
+    else:
+        finished_at = None
     elapsed = _compute_elapsed(started_at, finished_at, state)
 
     if state == "SUCCESS":

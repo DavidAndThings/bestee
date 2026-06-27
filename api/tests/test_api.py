@@ -6,6 +6,7 @@ the right task name and payload are dispatched, and polling reads a mocked
 """
 
 import json
+from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -96,7 +97,7 @@ def test_rrg_ticker_reference_requires_benchmark() -> None:
 
 
 def _mock_async_result(
-    state: str, result: Any = None, date_done: str | None = None
+    state: str, result: Any = None, date_done: datetime | None = None
 ) -> MagicMock:
     ar = MagicMock()
     ar.state = state
@@ -155,7 +156,7 @@ def test_poll_includes_timing_when_start_time_recorded() -> None:
     ar = _mock_async_result(
         "SUCCESS",
         result={"ok": True},
-        date_done="2024-01-01T12:00:10+00:00",
+        date_done=datetime(2024, 1, 1, 12, 0, 10, tzinfo=UTC),
     )
     start_times = {"task-999": "2024-01-01T12:00:00+00:00"}
     with (
