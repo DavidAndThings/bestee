@@ -7,6 +7,9 @@ repos:
       - id: check-yaml
       - id: check-toml
       - id: check-added-large-files
+        # Animated gif assets are intentionally large (the UI uses multi-MB
+        # gifs); keep the 500 KB guard for everything else.
+        exclude: ^ui/src/assets/gifs/
       - id: check-merge-conflict
       - id: debug-statements
 

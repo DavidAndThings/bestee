@@ -1,5 +1,8 @@
-import barChart from "../assets/gifs/bar-chart.gif";
+import server from "../assets/gifs/isometric-server.gif";
+import nokia from "../assets/gifs/retro-nokia.gif";
+import computer from "../assets/gifs/computer.gif";
 import paperMoney from "../assets/gifs/paper-money.gif";
+import pencil from "../assets/gifs/pencil.gif";
 
 export type ButtonVariant =
   | "btn-primary"
@@ -17,6 +20,10 @@ export type FieldDef = {
   description: string;
   choices?: string[];
   items?: { type: FieldType };
+  /** Whether the field may be omitted (mirrors an optional / defaulted model field). */
+  optional?: boolean;
+  /** Default pre-fill value (mirrors the model field's default). */
+  default?: string | number;
 };
 
 export type Schema = {
@@ -46,39 +53,58 @@ const RELATIVE_ROTATION_GRAPH_SCHEMA: Schema = {
   name: "Relative Rotation Graph",
   description: "The relative rotation graph for a given set of securities.",
   badge: "Markets",
-  imageUrl: barChart,
+  imageUrl: server,
   buttonVariant: "btn-primary",
   parameters: {
-    securities: {
+    tickers: {
       type: "array",
       items: {
         type: "string",
       },
-      description: "The securities to include in the graph.",
+      description: "The securities to plot on the rotation graph.",
     },
-    lookback_window: {
-      type: "integer",
-      description: "How many periods to look back for each security.",
+    start_date: {
+      type: "date",
+      description: "Start of the analysis window.",
     },
-    lookback_period: {
+    end_date: {
+      type: "date",
+      description: "End of the analysis window.",
+    },
+    reference_type: {
       type: "string",
       description:
-        "The period to use for the lookback (e.g. '1d', '1w', '1m').",
-      choices: ["1d", "1w", "1m"],
+        "Measure relative strength against an equal-weight basket of the tickers ('mean') or a single benchmark security ('ticker').",
+      choices: ["mean", "ticker"],
+      default: "mean",
     },
-    smoothing_method: {
+    benchmark_ticker: {
       type: "string",
       description:
-        "The smoothing method to use for Relative Strength and Relative Momentum calculations.",
-      choices: ["z-score", "double-ema"],
+        "Benchmark security to rotate against. Required when reference_type is 'ticker'.",
+      optional: true,
     },
-    smoothing_window: {
-      type: "integer",
-      description: "The window size for timer series smoothing.",
-    },
+  },
+  validate: (payload) => {
+    const errors: Record<string, string> = {};
+    const start = payload.start_date;
+    const end = payload.end_date;
+    if (typeof start === "string" && typeof end === "string" && start > end) {
+      errors.end_date = "The end date must be on or after the start date.";
+    }
+    if (payload.reference_type === "ticker" && !payload.benchmark_ticker) {
+      errors.benchmark_ticker =
+        "A benchmark ticker is required when reference type is 'ticker'.";
+    }
+    return errors;
   },
 };
 
+/**
+ * @deprecated The training-data-selection workflow (agglomerative clustering /
+ * representative selection) was retired from the backend. It is no longer listed
+ * in `SCHEMA_REGISTRY`; the export is kept only for reference and old-job lookups.
+ */
 const TRAINING_DATA_SELECTION_SCHEMA: Schema = {
   id: "training-data-selection",
   name: "Training Data Selection",
@@ -154,6 +180,132 @@ const TRAINING_DATA_SELECTION_SCHEMA: Schema = {
   },
 };
 
+const SPECTRAL_CLUSTERING_SCHEMA: Schema = {
+  id: "spectral-clustering",
+  name: "Spectral Clustering",
+  description:
+    "Group securities into clusters by their residual (market-neutral) co-movement.",
+  badge: "Clustering",
+  imageUrl: computer,
+  buttonVariant: "btn-accent",
+  parameters: {
+    tickers: {
+      type: "array",
+      items: {
+        type: "string",
+      },
+      description: "The securities to cluster.",
+    },
+    start_date: {
+      type: "date",
+      description: "Start of the analysis window.",
+    },
+    end_date: {
+      type: "date",
+      description: "End of the analysis window.",
+    },
+    min_num_clusters: {
+      type: "integer",
+      description:
+        "Smallest number of clusters to consider; the best count is selected within this range.",
+      default: 2,
+    },
+    max_num_clusters: {
+      type: "integer",
+      description:
+        "Largest number of clusters to consider; the best count is selected within this range.",
+      default: 50,
+    },
+  },
+  validate: (payload) => {
+    const errors: Record<string, string> = {};
+    const start = payload.start_date;
+    const end = payload.end_date;
+    if (typeof start === "string" && typeof end === "string" && start > end) {
+      errors.end_date = "The end date must be on or after the start date.";
+    }
+    const min = payload.min_num_clusters;
+    const max = payload.max_num_clusters;
+    if (typeof min === "number" && typeof max === "number" && min > max) {
+      errors.max_num_clusters =
+        "The maximum number of clusters must be at least the minimum.";
+    }
+    return errors;
+  },
+};
+
+const REGIME_DETECTION_SCHEMA: Schema = {
+  id: "regime-detection",
+  name: "Regime Detection",
+  description:
+    "Label each security's history into market regimes (e.g. calm vs. turbulent).",
+  badge: "Markets",
+  imageUrl: pencil,
+  buttonVariant: "btn-info",
+  parameters: {
+    tickers: {
+      type: "array",
+      items: {
+        type: "string",
+      },
+      description: "The securities to detect regimes for.",
+    },
+    start_date: {
+      type: "date",
+      description: "Start of the analysis window.",
+    },
+    end_date: {
+      type: "date",
+      description: "End of the analysis window.",
+    },
+  },
+  validate: (payload) => {
+    const errors: Record<string, string> = {};
+    const start = payload.start_date;
+    const end = payload.end_date;
+    if (typeof start === "string" && typeof end === "string" && start > end) {
+      errors.end_date = "The end date must be on or after the start date.";
+    }
+    return errors;
+  },
+};
+
+const FAMA_FRENCH_SCHEMA: Schema = {
+  id: "fama-french",
+  name: "Fama-French Factor Model",
+  description:
+    "Fit a Fama-French factor regression for each security over an estimation window.",
+  badge: "Factors",
+  imageUrl: nokia,
+  buttonVariant: "btn-success",
+  parameters: {
+    tickers: {
+      type: "array",
+      items: {
+        type: "string",
+      },
+      description: "The securities to fit factor models for.",
+    },
+    start_date: {
+      type: "date",
+      description: "Start of the estimation window.",
+    },
+    end_date: {
+      type: "date",
+      description: "End of the estimation window.",
+    },
+  },
+  validate: (payload) => {
+    const errors: Record<string, string> = {};
+    const start = payload.start_date;
+    const end = payload.end_date;
+    if (typeof start === "string" && typeof end === "string" && start > end) {
+      errors.end_date = "The end date must be on or after the start date.";
+    }
+    return errors;
+  },
+};
+
 /**
  * The single source of truth for available charts. Each entry renders a card on
  * the home page and powers a chart setup form at `/charts/:id`. Add a new chart
@@ -161,7 +313,9 @@ const TRAINING_DATA_SELECTION_SCHEMA: Schema = {
  */
 export const SCHEMA_REGISTRY: Schema[] = [
   RELATIVE_ROTATION_GRAPH_SCHEMA,
-  TRAINING_DATA_SELECTION_SCHEMA,
+  SPECTRAL_CLUSTERING_SCHEMA,
+  REGIME_DETECTION_SCHEMA,
+  FAMA_FRENCH_SCHEMA,
 ];
 
 export function getSchema(id: string | undefined): Schema | undefined {
@@ -169,4 +323,10 @@ export function getSchema(id: string | undefined): Schema | undefined {
   return SCHEMA_REGISTRY.find((schema) => schema.id === id);
 }
 
-export { RELATIVE_ROTATION_GRAPH_SCHEMA, TRAINING_DATA_SELECTION_SCHEMA };
+export {
+  FAMA_FRENCH_SCHEMA,
+  REGIME_DETECTION_SCHEMA,
+  RELATIVE_ROTATION_GRAPH_SCHEMA,
+  SPECTRAL_CLUSTERING_SCHEMA,
+  TRAINING_DATA_SELECTION_SCHEMA,
+};
