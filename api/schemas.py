@@ -23,3 +23,12 @@ class TaskStatus(BaseModel):
     state: str
     result: dict[str, Any] | None = None
     error: str | None = None
+
+
+class JobsPage(BaseModel):
+    """A paginated slice of all jobs in the result backend."""
+
+    total: int
+    offset: int
+    limit: int
+    items: list[TaskStatus]

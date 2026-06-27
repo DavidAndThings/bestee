@@ -5,6 +5,8 @@ the right task name and payload are dispatched, and polling reads a mocked
 :class:`AsyncResult`.
 """
 
+import json
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -131,3 +133,99 @@ def test_poll_returns_state_only_when_pending() -> None:
     assert payload["state"] == "PENDING"
     assert payload["result"] is None
     assert payload["error"] is None
+
+
+# ---------------------------------------------------------------------------
+# GET /jobs  (list all jobs)
+# ---------------------------------------------------------------------------
+
+
+def _mock_redis(
+    keys: list[str],
+    mget_values: list[Any] | None = None,
+) -> MagicMock:
+    """Build a mock Redis client for list-jobs tests."""
+    mock = MagicMock()
+    mock.scan_iter.return_value = keys
+    if mget_values is not None:
+        mock.mget.return_value = mget_values
+    return mock
+
+
+def test_list_jobs_empty() -> None:
+    with patch("redis_client._redis_client", _mock_redis([])):
+        response = client.get("/jobs")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["total"] == 0
+    assert data["items"] == []
+    assert data["offset"] == 0
+    assert data["limit"] == 20
+
+
+def test_list_jobs_returns_all_statuses() -> None:
+    keys = ["celery-task-meta-aaa", "celery-task-meta-bbb"]
+    mget_vals = [
+        json.dumps({"task_id": "aaa", "status": "SUCCESS", "result": {"x": 1}}),
+        json.dumps({"task_id": "bbb", "status": "PENDING"}),
+    ]
+    with patch("redis_client._redis_client", _mock_redis(keys, mget_vals)):
+        response = client.get("/jobs")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["total"] == 2
+    assert len(data["items"]) == 2
+    # keys are sorted, so aaa comes first
+    assert data["items"][0]["task_id"] == "aaa"
+    assert data["items"][0]["state"] == "SUCCESS"
+    assert data["items"][0]["result"] == {"x": 1}
+    assert data["items"][1]["state"] == "PENDING"
+
+
+def test_list_jobs_failure_entry_formats_error() -> None:
+    keys = ["celery-task-meta-xyz"]
+    mget_vals = [
+        json.dumps(
+            {
+                "task_id": "xyz",
+                "status": "FAILURE",
+                "result": {"exc_type": "ValueError", "exc_message": ["bad input"]},
+            }
+        )
+    ]
+    with patch("redis_client._redis_client", _mock_redis(keys, mget_vals)):
+        response = client.get("/jobs")
+    item = response.json()["items"][0]
+    assert item["state"] == "FAILURE"
+    assert "ValueError" in item["error"]
+    assert "bad input" in item["error"]
+    assert item["result"] is None
+
+
+def test_list_jobs_pagination() -> None:
+    # 5 tasks; request page starting at offset=2, size=2
+    keys = [f"celery-task-meta-task-{i}" for i in range(5)]
+    # sorted task ids: task-0 .. task-4; offset=2,limit=2 → task-2, task-3
+    mget_vals = [
+        json.dumps({"task_id": f"task-{i}", "status": "SUCCESS", "result": {}})
+        for i in range(2, 4)
+    ]
+    with patch("redis_client._redis_client", _mock_redis(keys, mget_vals)):
+        response = client.get("/jobs?offset=2&limit=2")
+    data = response.json()
+    assert data["total"] == 5
+    assert data["offset"] == 2
+    assert data["limit"] == 2
+    assert len(data["items"]) == 2
+    assert data["items"][0]["task_id"] == "task-2"
+    assert data["items"][1]["task_id"] == "task-3"
+
+
+def test_list_jobs_rejects_invalid_limit() -> None:
+    response = client.get("/jobs?limit=0")
+    assert response.status_code == 422
+
+
+def test_list_jobs_rejects_limit_above_max() -> None:
+    response = client.get("/jobs?limit=101")
+    assert response.status_code == 422

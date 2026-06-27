@@ -9,6 +9,7 @@ imports the analytics stack.
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from kombu.exceptions import OperationalError
+from redis.exceptions import RedisError
 
 from routers import clustering, fama_french, jobs, regime, rrg
 
@@ -35,4 +36,13 @@ async def handle_broker_unavailable(
     return JSONResponse(
         status_code=503,
         content={"detail": "Task queue is unavailable."},
+    )
+
+
+@app.exception_handler(RedisError)
+async def handle_redis_unavailable(request: Request, exc: RedisError) -> JSONResponse:
+    """Return 503 when the Redis result backend cannot be reached."""
+    return JSONResponse(
+        status_code=503,
+        content={"detail": "Result backend is unavailable."},
     )
