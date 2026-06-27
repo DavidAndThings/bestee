@@ -1,9 +1,8 @@
 """Celery *producer* client.
 
-The API does not run the analyses -- it only enqueues them. It therefore needs
-nothing from ``bestee-compute``: it talks to the same Redis broker / backend as
-the ``queue`` worker and dispatches tasks by their registered name, then reads
-results back by task id.
+The API does not run the analyses -- it only enqueues them: this client talks to
+the same Redis broker / backend as the ``queue`` worker and dispatches tasks by
+their registered name, then reads results back by task id.
 """
 
 import os

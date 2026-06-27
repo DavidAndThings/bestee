@@ -1,9 +1,10 @@
 """Submit an auto-tuned spectral clustering job."""
 
+from bestee_compute.workflow.tuning import ClusteringRequest
 from fastapi import APIRouter
 
 from celery_client import dispatch
-from schemas import ClusteringRequest, TaskHandle
+from schemas import TaskHandle
 
 router = APIRouter(prefix="/tasks", tags=["clustering"])
 

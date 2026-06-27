@@ -5,11 +5,15 @@ description = "FastAPI producer that enqueues the bestee-compute tuning jobs ont
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
+    "bestee-compute",
     "celery[redis]>=5.6.3",
     "fastapi>=0.138.0",
     "python-dotenv>=1.0.1",
     "uvicorn[standard]>=0.30",
 ]
+
+[tool.uv.sources]
+bestee-compute = { path = "../compute", editable = true }
 
 [tool.ruff]
 src = ["."]

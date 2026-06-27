@@ -2,8 +2,10 @@
 
 A thin [FastAPI](https://fastapi.tiangolo.com/) producer that enqueues the
 `bestee-compute` tuning optimizers onto the shared Celery/Redis queue. It
-dispatches tasks **by name** and polls their results, so it never imports the
-analytics stack -- the `queue` worker does the heavy lifting.
+dispatches tasks **by name** and polls their results -- it never *runs* an
+analysis (the `queue` worker does the heavy lifting). It depends on
+`bestee-compute` only to reuse the request models, so the API and worker
+validate against a single source of truth.
 
 ## Endpoints
 

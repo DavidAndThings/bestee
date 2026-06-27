@@ -1,9 +1,10 @@
 """Submit an auto-tuned relative-rotation-graph job."""
 
+from bestee_compute.workflow.tuning import RRGRequest
 from fastapi import APIRouter
 
 from celery_client import dispatch
-from schemas import RRGRequest, TaskHandle
+from schemas import TaskHandle
 
 router = APIRouter(prefix="/tasks", tags=["rrg"])
 

@@ -1,9 +1,10 @@
 """Submit an auto-tuned per-asset regime-detection job."""
 
+from bestee_compute.workflow.tuning import RegimeRequest
 from fastapi import APIRouter
 
 from celery_client import dispatch
-from schemas import RegimeRequest, TaskHandle
+from schemas import TaskHandle
 
 router = APIRouter(prefix="/tasks", tags=["regime"])
 

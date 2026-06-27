@@ -1,9 +1,10 @@
 """Submit an auto-tuned Fama-French factor-model job."""
 
+from bestee_compute.workflow.tuning import FamaFrenchRequest
 from fastapi import APIRouter
 
 from celery_client import dispatch
-from schemas import FamaFrenchRequest, TaskHandle
+from schemas import TaskHandle
 
 router = APIRouter(prefix="/tasks", tags=["fama-french"])
 
