@@ -36,6 +36,13 @@ repos:
         types: [python]
         files: ^chat/
         pass_filenames: false
+      - id: ty-queue
+        name: ty check (queue)
+        entry: bash -c 'cd queue && uvx ty check'
+        language: system
+        types: [python]
+        files: ^queue/
+        pass_filenames: false
       - id: eslint-ui
         name: eslint (ui)
         entry: bash -c 'cd ui && npm run lint'

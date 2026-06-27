@@ -1,0 +1,38 @@
+[project]
+name = "queue"
+version = "0.1.0"
+description = "Celery worker that runs the bestee-compute tuning optimizers as background jobs."
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "bestee-compute",
+    "celery>=5.6.3",
+    "dotenv>=0.9.9",
+    "pydantic>=2.13.4",
+    "pydo>=0.37.0",
+]
+
+[tool.uv.sources]
+bestee-compute = { path = "../compute", editable = true }
+
+[tool.ruff]
+src = ["."]
+line-length = 88
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP"]
+
+[tool.ty.rules]
+possibly-unresolved-reference = "warn"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[dependency-groups]
+dev = [
+    "pre-commit>=4.0",
+    "pytest>=8.0",
+    "ruff>=0.11",
+    "ty>=0.0.1",
+]
