@@ -73,11 +73,7 @@ def optimize_fama_french(self, request: dict[str, Any]) -> dict[str, Any]:
             }
             for spec_name, spec_results in result.results.items()
         },
-        "oos_residuals": (
-            result.oos_residuals.to_dicts()
-            if result.oos_residuals is not None
-            else None
-        ),
+        "oos_residuals": result.oos_residuals.to_dicts(),
     }
 
 

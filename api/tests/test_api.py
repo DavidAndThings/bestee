@@ -42,6 +42,7 @@ SUBMIT_CASES = [
         {
             "tickers": ["AAA"],
             "intervals": [{"start_date": "2020-01-01", "end_date": "2020-12-31"}],
+            "oos_dates": ["2021-01-15"],
         },
     ),
     (
