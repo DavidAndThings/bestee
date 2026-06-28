@@ -1,13 +1,18 @@
 """Fetch all tickers from the Massive (formerly Polygon.io) API."""
 
+import importlib.resources
+import json
 import logging
+from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
+from typing import cast
 
 import polars as pl
 from great_tables import GT
 from massive import RESTClient
-from massive.rest.models import Ticker, TickerDetails
+from massive.rest.models import RelatedCompany, Ticker, TickerDetails
 
+import bestee_compute.resources
 from bestee_compute.client import get_client
 from bestee_compute.stocks import columns as cols
 
@@ -324,6 +329,12 @@ def get_ticker_details(
     )
 
 
+# ── Ticker → SIC code index (bundled cache) ──────────────────────────
+
+_TICKER_SIC_RESOURCE = "ticker_sic_codes.json"
+_ticker_sic_index: dict[str, str] | None = None
+
+
 def _sic_key(value: object) -> str:
     """Normalize a SIC code to a comparable string.
 
@@ -334,74 +345,164 @@ def _sic_key(value: object) -> str:
     return str(int(text)) if text.isdigit() else text
 
 
-def get_tickers_by_sic_code(
-    sic_code: str | int,
+def _load_ticker_sic_index() -> dict[str, str]:
+    """Load the bundled ``ticker -> SIC code`` map, cached after first read."""
+    global _ticker_sic_index
+    if _ticker_sic_index is None:
+        ref = importlib.resources.files(bestee_compute.resources).joinpath(
+            _TICKER_SIC_RESOURCE
+        )
+        _ticker_sic_index = cast(
+            dict[str, str], json.loads(ref.read_text(encoding="utf-8"))
+        )
+    return _ticker_sic_index
+
+
+def build_ticker_sic_index(
     *,
-    tickers: list[str] | None = None,
     api_key: str | None = None,
     market: str | None = "stocks",
-    ticker_type: str | None = "CS",
+    ticker_type: str | None = None,
     active: bool | None = True,
     limit: int = 1000,
-    max_workers: int = 10,
-) -> list[str]:
-    """Return every ticker whose company SIC code equals *sic_code*.
+    max_workers: int = 20,
+) -> dict[str, str]:
+    """Fetch every ticker in the universe and map it to its SIC code.
 
-    The Massive ``list_tickers`` endpoint exposes no SIC filter, so the code
-    must be read from each company's :class:`TickerDetails`.  This function
-    therefore (1) takes a candidate universe -- *tickers* if given, otherwise
-    every symbol matching *market*/*ticker_type*/*active* -- and (2) fetches
-    their details concurrently and keeps those whose ``sic_code`` matches.
-
-    Step 2 issues one details request per candidate, so the default universe
-    (US common stocks) is several thousand calls.  Pass *tickers* to scope the
-    search when you already have a candidate set.
+    Returns ``{ticker: sic_code}`` (normalized strings) for every ticker that
+    carries a SIC code; those without one (most ETFs and funds) are omitted.
+    This makes one details request per ticker -- the universe is several
+    thousand symbols -- so it exists to (re)build the bundled cache that
+    :func:`get_tickers_by_sic_code` reads, not to run on every call.
 
     Args:
-        sic_code: The SIC code to match (``"7372"`` or ``7372``).
-        tickers: Candidate symbols to filter.  When *None*, the universe is
-            fetched from the Massive API.
-        api_key: Massive API key.  Falls back to the ``MASSIVE_API_KEY``
-            environment variable when *None*.
-        market: Market filter for the fetched universe (default ``"stocks"``).
-        ticker_type: Ticker-type filter for the fetched universe (default
-            ``"CS"``, common stock).  Pass *None* for every type.
-        active: If *True* only actively-traded tickers form the universe.
-        limit: Page size when fetching the universe (max 1000).
+        api_key: Massive API key.  Falls back to ``MASSIVE_API_KEY``.
+        market: Market filter (default ``"stocks"``).
+        ticker_type: Ticker-type filter (default *None*, every type).
+        active: Restrict to actively-traded tickers (default *True*).
+        limit: Page size when listing the universe (max 1000).
         max_workers: Number of concurrent details requests.
 
     Returns:
-        A sorted list of the matching ticker symbols.
+        A ``{ticker: sic_code}`` mapping.
 
     Raises:
         RuntimeError: If no API key is available.
     """
-    target = _sic_key(sic_code)
-    if tickers is None:
-        candidates = [
-            t.ticker
-            for t in _fetch_tickers(
-                api_key=api_key,
-                market=market,
-                ticker_type=ticker_type,
-                active=active,
-                limit=limit,
-            )
-        ]
-    else:
-        candidates = list(tickers)
-
+    universe = [
+        t.ticker
+        for t in _fetch_tickers(
+            api_key=api_key,
+            market=market,
+            ticker_type=ticker_type,
+            active=active,
+            limit=limit,
+        )
+    ]
     client = get_client(api_key)
-    logger.info(
-        "Filtering %d candidate tickers for SIC code %s", len(candidates), target
-    )
+    logger.info("Building ticker->SIC index for %d tickers", len(universe))
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
-        details = pool.map(lambda s: _fetch_one_ticker_detail(client, s), candidates)
+        details = pool.map(lambda s: _fetch_one_ticker_detail(client, s), universe)
+    index: dict[str, str] = {}
+    for detail in details:
+        if detail is None:
+            continue
+        ticker = detail.ticker
+        sic = _sic_key(getattr(detail, "sic_code", None))
+        if ticker and sic:
+            index[ticker] = sic
+    logger.info("Built ticker->SIC index with %d entries", len(index))
+    return index
 
-    matches = sorted(
-        detail.ticker
-        for detail in details
-        if detail is not None and _sic_key(getattr(detail, "sic_code", None)) == target
-    )
-    logger.info("Found %d tickers with SIC code %s", len(matches), target)
-    return matches
+
+def get_tickers_by_sic_code(
+    sic_code: str | int,
+    *,
+    index: Mapping[str, str] | None = None,
+    refresh: bool = False,
+    api_key: str | None = None,
+) -> list[str]:
+    """Return every ticker whose company SIC code equals *sic_code*.
+
+    Reads the bundled ``ticker -> SIC code`` cache by default (offline and
+    instant).  Pass *index* to filter a custom map, or *refresh=True* to rebuild
+    the map live from the Massive API via :func:`build_ticker_sic_index` (slow).
+
+    Args:
+        sic_code: The SIC code to match (``"7372"`` or ``7372``).
+        index: A ``{ticker: sic_code}`` map to filter.  Defaults to the bundled
+            cache (or a fresh build when *refresh* is *True*).
+        refresh: Rebuild the index from the Massive API instead of the cache.
+        api_key: Massive API key (only used when *refresh* is *True*).
+
+    Returns:
+        A sorted list of the matching ticker symbols.
+    """
+    target = _sic_key(sic_code)
+    if index is None:
+        index = (
+            build_ticker_sic_index(api_key=api_key)
+            if refresh
+            else _load_ticker_sic_index()
+        )
+    return sorted(ticker for ticker, sic in index.items() if sic == target)
+
+
+# ── Related companies ────────────────────────────────────────────────
+
+
+def get_related_tickers(ticker: str, *, api_key: str | None = None) -> list[str]:
+    """Return the tickers Massive reports as related to *ticker*.
+
+    Wraps the ``/related-companies`` endpoint.  Network/SDK errors are caught
+    and reported via the logger, returning an empty list.
+    """
+    client = get_client(api_key)
+    try:
+        related = cast(list[RelatedCompany], client.get_related_companies(ticker))
+    except Exception:
+        logger.warning(
+            "Failed to fetch related companies for %s", ticker, exc_info=True
+        )
+        return []
+    return [rc.ticker for rc in related if rc.ticker]
+
+
+def _sic_lookup(ticker: str, index: Mapping[str, str], client: RESTClient) -> str:
+    """SIC code for *ticker* from *index*, falling back to a live details call."""
+    if ticker in index:
+        return index[ticker]
+    detail = _fetch_one_ticker_detail(client, ticker)
+    return _sic_key(getattr(detail, "sic_code", None)) if detail else ""
+
+
+def related_tickers_sharing_sic(
+    ticker: str,
+    *,
+    index: Mapping[str, str] | None = None,
+    api_key: str | None = None,
+) -> list[str]:
+    """Related companies of *ticker* that share its SIC code.
+
+    Reads the seed's and each related company's SIC code from the bundled
+    ``ticker -> SIC code`` cache (falling back to a live :class:`TickerDetails`
+    lookup for symbols missing from it), then keeps the related tickers whose
+    SIC code matches the seed's.
+
+    Args:
+        ticker: The seed ticker whose industry peers we compare against.
+        index: A ``{ticker: sic_code}`` map; defaults to the bundled cache.
+        api_key: Massive API key.  Falls back to ``MASSIVE_API_KEY``.
+
+    Returns:
+        A sorted list of related tickers with the same SIC code as *ticker*
+        (empty when the seed's SIC code is unknown).
+    """
+    idx = index if index is not None else _load_ticker_sic_index()
+    client = get_client(api_key)
+    seed_sic = _sic_lookup(ticker, idx, client)
+    if not seed_sic:
+        logger.info("No SIC code known for %s; cannot compare peers", ticker)
+        return []
+    related = get_related_tickers(ticker, api_key=api_key)
+    return sorted(r for r in related if _sic_lookup(r, idx, client) == seed_sic)
