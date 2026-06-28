@@ -155,7 +155,8 @@ class ClusteringTuning:
     silhouette: float
     n_clusters: int
 
-    def simplified(self) -> Mapping[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
+        """Full JSON-serializable representation (all primitive fields)."""
         return {
             "labels": self.labels,
             "residualization_window": self.residualization_window,
@@ -165,10 +166,6 @@ class ClusteringTuning:
             "silhouette": self.silhouette,
             "n_clusters": self.n_clusters,
         }
-
-    def to_dict(self) -> dict[str, Any]:
-        """Full JSON-serializable representation (all primitive fields)."""
-        return dict(self.simplified())
 
     def save(self, path: Path) -> None:
         """Persist to *path* as a single ``metadata.json`` file."""
@@ -287,15 +284,6 @@ class RegimeTuning:
     normalization_window: int
     hmm_lag: int
     mean_bic: float
-
-    def simplified(self) -> Mapping[str, Any]:
-        return {
-            "labels": self.labels,
-            "residualization_window": self.residualization_window,
-            "normalization_window": self.normalization_window,
-            "hmm_lag": self.hmm_lag,
-            "mean_bic": self.mean_bic,
-        }
 
     def to_dict(self) -> dict[str, Any]:
         """Full JSON-serializable representation including per-asset decoded states."""
