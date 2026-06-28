@@ -463,7 +463,7 @@ def build_ticker_sic_index(
     return index
 
 
-def get_tickers_by_sic_category_name(
+def get_tickers_by_sic_industry_title(
     name: str,
     *,
     index: Mapping[str, str] | None = None,

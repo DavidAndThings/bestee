@@ -1,10 +1,22 @@
 """Tests for bestee_compute.stocks.sic."""
 
+from collections.abc import Iterator
 from unittest.mock import MagicMock, patch
 
+import pytest
 from great_tables import GT
 
+from bestee_compute.stocks import sic
 from bestee_compute.stocks.sic import _load_bundled_cache, _strip_html, get_sic_codes
+
+
+@pytest.fixture(autouse=True)
+def _clear_sic_cache() -> Iterator[None]:
+    """Reset the memoized SIC frame so each test exercises the mocked path."""
+    sic.get_sic_codes_df.cache_clear()
+    yield
+    sic.get_sic_codes_df.cache_clear()
+
 
 _SAMPLE_HTML = """
 <html><body>
@@ -120,8 +132,6 @@ class TestGetSicCodes:
         _mock_cache: MagicMock,
     ) -> None:
         """Should raise RuntimeError when both scrape and cache fail."""
-        import pytest
-
         with pytest.raises(RuntimeError, match="Could not obtain SIC codes"):
             get_sic_codes()
 

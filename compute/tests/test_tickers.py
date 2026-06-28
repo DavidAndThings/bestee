@@ -18,8 +18,8 @@ from bestee_compute.stocks.tickers import (
     _sic_key,
     build_ticker_sic_index,
     get_related_tickers,
-    get_tickers_by_sic_category_name,
     get_tickers_by_sic_code,
+    get_tickers_by_sic_industry_title,
     related_tickers_sharing_sic,
 )
 
@@ -174,7 +174,7 @@ def test_injected_index_does_not_persist(
     assert not user_cache.exists()
 
 
-# ── get_tickers_by_sic_category_name ────────────────────────────────
+# ── get_tickers_by_sic_industry_title ────────────────────────────────
 
 _SIC_TITLES = pl.DataFrame(
     {
@@ -191,24 +191,24 @@ _SIC_DF_PATCH = "bestee_compute.stocks.tickers.get_sic_codes_df"
 
 
 @patch(_SIC_DF_PATCH, return_value=_SIC_TITLES)
-def test_category_name_aggregates_all_matching_codes(_mock_df: MagicMock) -> None:
+def test_industry_title_aggregates_all_matching_codes(_mock_df: MagicMock) -> None:
     index = {"AAA": "7372", "BBB": "5045", "CCC": "6021", "DDD": "5734"}
     # Case-insensitive: "software" matches the three software titles (not banks),
     # and tickers from all three codes are aggregated.
-    result = get_tickers_by_sic_category_name("software", index=index)
+    result = get_tickers_by_sic_industry_title("software", index=index)
     assert result == ["AAA", "BBB", "DDD"]
 
 
 @patch(_SIC_DF_PATCH, return_value=_SIC_TITLES)
-def test_category_name_no_match_returns_empty(_mock_df: MagicMock) -> None:
+def test_industry_title_no_match_returns_empty(_mock_df: MagicMock) -> None:
     # No title contains this -- must return [] rather than raising IndexError.
-    assert get_tickers_by_sic_category_name("nonesuch", index={"AAA": "7372"}) == []
+    assert get_tickers_by_sic_industry_title("nonesuch", index={"AAA": "7372"}) == []
 
 
 @patch(_SIC_DF_PATCH, return_value=_SIC_TITLES)
-def test_category_name_treats_name_as_literal(_mock_df: MagicMock) -> None:
+def test_industry_title_treats_name_as_literal(_mock_df: MagicMock) -> None:
     # "&" is a regex metacharacter; as a literal it matches the wholesale title.
-    result = get_tickers_by_sic_category_name(
+    result = get_tickers_by_sic_industry_title(
         "equipment & software", index={"BBB": "5045"}
     )
     assert result == ["BBB"]

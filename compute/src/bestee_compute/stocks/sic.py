@@ -1,5 +1,6 @@
 """Scrape SIC codes and descriptions from the SEC website."""
 
+import functools
 import html
 import importlib.resources
 import json
@@ -172,8 +173,14 @@ def _load_cache() -> list[dict[str, str]] | None:
 # ── Public API ───────────────────────────────────────────────────────
 
 
+@functools.cache
 def get_sic_codes_df() -> pl.DataFrame:
-    """Return the complete SIC code list as a Polars DataFrame."""
+    """Return the complete SIC code list as a Polars DataFrame.
+
+    Memoized: the SEC scrape (and cache save) runs once per process and later
+    calls return the cached frame.  Call ``get_sic_codes_df.cache_clear()`` to
+    force a refresh.
+    """
 
     rows: list[dict[str, str]] | None = None
 
