@@ -80,6 +80,29 @@ def test_submit_enqueues_task(path: str, task_name: str, body: dict) -> None:
     assert send.call_args.kwargs["args"][0]["tickers"] == body["tickers"]
 
 
+def test_submit_passes_user_email_to_task() -> None:
+    from auth import get_user_email
+
+    main.app.dependency_overrides[get_user_email] = lambda: "user@example.com"
+    sent = MagicMock()
+    sent.id = "task-xyz"
+    try:
+        with patch("celery_client.celery_app.send_task", return_value=sent) as send:
+            response = client.post(
+                "/tasks/clustering",
+                json={
+                    "tickers": ["AAA", "BBB"],
+                    "start_date": "2020-01-01",
+                    "end_date": "2020-12-31",
+                },
+            )
+        assert response.status_code == 202
+        # args = [payload, user_email]
+        assert send.call_args.kwargs["args"][1] == "user@example.com"
+    finally:
+        main.app.dependency_overrides.pop(get_user_email, None)
+
+
 def test_clustering_requires_two_tickers() -> None:
     body = {
         "tickers": ["AAA"],

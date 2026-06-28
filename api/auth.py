@@ -79,3 +79,22 @@ def require_auth(
             detail="Invalid or expired session token.",
             headers={"WWW-Authenticate": "Bearer"},
         ) from exc
+
+
+_EMAIL_CLAIMS = ("email", "email_address", "primary_email_address")
+
+
+def get_user_email(
+    claims: Annotated[dict[str, Any], Depends(require_auth)],
+) -> str | None:
+    """Best-effort extraction of the authenticated user's email.
+
+    Clerk session tokens only carry the email when the JWT template adds it as
+    a custom claim (e.g. ``"email": "{{user.primary_email_address}}"`` in the
+    session-token template); returns ``None`` when no such claim is present.
+    """
+    for key in _EMAIL_CLAIMS:
+        value = claims.get(key)
+        if isinstance(value, str) and value:
+            return value
+    return None

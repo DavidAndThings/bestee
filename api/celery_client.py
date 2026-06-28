@@ -29,9 +29,11 @@ def build_celery_app() -> Celery:
 celery_app = build_celery_app()
 
 
-def dispatch(task_name: str, payload: dict[str, Any]) -> str:
-    """Enqueue *task_name* with *payload* and return the Celery task id."""
-    return celery_app.send_task(task_name, args=[payload]).id
+def dispatch(
+    task_name: str, payload: dict[str, Any], user_email: str | None = None
+) -> str:
+    """Enqueue *task_name* with *payload* (+ requester email) and return its id."""
+    return celery_app.send_task(task_name, args=[payload, user_email]).id
 
 
 def get_result(task_id: str) -> AsyncResult:
