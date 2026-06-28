@@ -339,6 +339,9 @@ class FamaFrenchRequest(BaseModel):
         return self
 
 
+_TRADING_DAYS_PER_YEAR = 252
+
+
 @dataclass
 class FamaFrenchTuning:
     """Best factor model found across all requested estimation intervals.
@@ -346,9 +349,8 @@ class FamaFrenchTuning:
     ``specifications`` holds one :class:`fama.FamaFrenchSpecification` per
     requested interval, all using the chosen ``factors_to_use``.  ``results``
     maps each specification's name to its per-ticker
-    :class:`fama.FamaFrenchResult`.  When the request includes an ``oos_date``,
-    ``oos_residuals`` carries the long
-    ``[Ticker, Specification, Residual, ZScore, PValue]`` frame.
+    :class:`fama.FamaFrenchResult`.  ``oos_residuals`` carries the long
+    ``[Date, Ticker, Specification, Residual, ZScore, PValue]`` frame.
     """
 
     factors_to_use: int
@@ -356,6 +358,60 @@ class FamaFrenchTuning:
     results: Mapping[str, Mapping[str, fama.FamaFrenchResult]]
     mean_adjusted_r_squared: float
     oos_residuals: pl.DataFrame
+
+    def summary(self) -> pl.DataFrame:
+        """Headline per-(specification, ticker) statistics as a flat frame.
+
+        Flattens the nested ``results`` mapping into one row per fitted
+        ``(Specification, Ticker)`` pair, sorted by specification then ticker.
+        Useful for a quick cross-sectional review without navigating the
+        nested ``results`` dict.
+
+        Columns:
+
+        * ``Specification`` -- window + factor-count label (e.g.
+          ``FF6_2020-01-01_2022-12-31``).
+        * ``Ticker``
+        * ``Alpha`` -- daily intercept; the excess return unexplained by
+          the factors.
+        * ``AnnualizedAlpha`` -- ``Alpha × 252`` for easier interpretation.
+        * ``AlphaTStat`` -- t-statistic on alpha; values beyond ±2 suggest
+          statistical significance.
+        * ``MktBeta`` -- loading on ``Mkt-RF``, the dominant risk factor.
+        * ``AdjR2`` -- adjusted R² of the in-sample fit.
+        * ``ResidualStd`` -- daily idiosyncratic volatility (std of
+          residuals); used to standardize OOS residuals into z-scores.
+        * ``N`` -- number of in-window trading days used to fit the model.
+        """
+        rows = [
+            {
+                "Specification": spec_name,
+                "Ticker": ticker,
+                "Alpha": result.alpha,
+                "AnnualizedAlpha": result.alpha * _TRADING_DAYS_PER_YEAR,
+                "AlphaTStat": result.t_stats.get("alpha", float("nan")),
+                "MktBeta": result.betas.get("Mkt-RF", float("nan")),
+                "AdjR2": result.adj_r_squared,
+                "ResidualStd": result.residual_std,
+                "N": result.n_observations,
+            }
+            for spec_name, ticker_results in self.results.items()
+            for ticker, result in ticker_results.items()
+        ]
+        return pl.DataFrame(
+            rows,
+            schema={
+                "Specification": pl.Utf8,
+                "Ticker": pl.Utf8,
+                "Alpha": pl.Float64,
+                "AnnualizedAlpha": pl.Float64,
+                "AlphaTStat": pl.Float64,
+                "MktBeta": pl.Float64,
+                "AdjR2": pl.Float64,
+                "ResidualStd": pl.Float64,
+                "N": pl.Int64,
+            },
+        ).sort(["Specification", "Ticker"])
 
 
 def optimize_fama_french(
