@@ -11,7 +11,7 @@ from fastapi.responses import JSONResponse
 from kombu.exceptions import OperationalError
 from redis.exceptions import RedisError
 
-from routers import clustering, fama_french, jobs, regime, rrg
+from routers import clustering, fama_french, jobs, regime, results, rrg
 
 app = FastAPI(title="bestee tuning API", version="0.1.0")
 
@@ -20,6 +20,7 @@ app.include_router(regime.router)
 app.include_router(fama_french.router)
 app.include_router(rrg.router)
 app.include_router(jobs.router)
+app.include_router(results.router)
 
 
 @app.get("/health", tags=["health"])

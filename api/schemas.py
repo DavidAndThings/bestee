@@ -35,3 +35,11 @@ class JobsPage(BaseModel):
     offset: int
     limit: int
     items: list[TaskStatus]
+
+
+class ResultMeta(BaseModel):
+    """Summary of a persisted tuning result, returned by the listing endpoint."""
+
+    result_id: str
+    analysis_type: str
+    created_at: str  # ISO UTC datetime string

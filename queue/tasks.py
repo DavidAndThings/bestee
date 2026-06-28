@@ -13,10 +13,9 @@ environment must provide the relevant API keys (``MASSIVE_API_KEY``, and
 """
 
 import os
-from dataclasses import asdict
+from pathlib import Path
 from typing import Any
 
-import polars as pl
 import resend
 from bestee_compute.workflow import tuning
 from celery import shared_task
@@ -24,29 +23,31 @@ from dotenv import load_dotenv
 
 load_dotenv()
 resend.api_key = os.environ.get("RESEND_API_KEY")
+_RESULTS_DIR = Path(os.environ.get("RESULTS_DIR", "./results"))
 
 
 @shared_task(name="tuning.optimize_clustering", bind=True)
 def optimize_clustering(self, request: dict[str, Any]) -> dict[str, Any]:
     """Auto-tuned spectral clustering for a :class:`ClusteringRequest` payload."""
-
-    result = tuning.optimize_clustering(
-        tuning.ClusteringRequest.model_validate(request)
-    )
-    send_completion_confirmation(
-        self.request.id,
-    )
-    return asdict(result)
+    req = tuning.ClusteringRequest.model_validate(request)
+    result = tuning.optimize_clustering(req)
+    rid = tuning.result_id("clustering", req)
+    result.save(_RESULTS_DIR / rid)
+    send_completion_confirmation(self.request.id)
+    return {"result_id": rid, **result.to_dict()}
 
 
 @shared_task(name="tuning.optimize_regime", bind=True)
 def optimize_regime(self, request: dict[str, Any]) -> dict[str, Any]:
     """Auto-tuned per-asset regime detection for a :class:`RegimeRequest` payload."""
-
-    result = tuning.optimize_regime(tuning.RegimeRequest.model_validate(request))
+    req = tuning.RegimeRequest.model_validate(request)
+    result = tuning.optimize_regime(req)
+    rid = tuning.result_id("regime", req)
+    result.save(_RESULTS_DIR / rid)
     # The fitted ``RegimeResult`` objects carry DataFrames / arrays, so only the
     # serializable summary (current regime per asset + chosen params) is returned.
     return {
+        "result_id": rid,
         "labels": dict(result.labels),
         "residualization_window": result.residualization_window,
         "normalization_window": result.normalization_window,
@@ -58,11 +59,12 @@ def optimize_regime(self, request: dict[str, Any]) -> dict[str, Any]:
 @shared_task(name="tuning.optimize_fama_french", bind=True)
 def optimize_fama_french(self, request: dict[str, Any]) -> dict[str, Any]:
     """Auto-tuned Fama-French fit for a :class:`FamaFrenchRequest` payload."""
-
-    result = tuning.optimize_fama_french(
-        tuning.FamaFrenchRequest.model_validate(request)
-    )
+    req = tuning.FamaFrenchRequest.model_validate(request)
+    result = tuning.optimize_fama_french(req)
+    rid = tuning.result_id("fama_french", req)
+    result.save(_RESULTS_DIR / rid)
     return {
+        "result_id": rid,
         "factors_to_use": result.factors_to_use,
         "specifications": [spec.model_dump() for spec in result.specifications],
         "mean_adjusted_r_squared": result.mean_adjusted_r_squared,
@@ -80,23 +82,12 @@ def optimize_fama_french(self, request: dict[str, Any]) -> dict[str, Any]:
 @shared_task(name="tuning.optimize_rrg", bind=True)
 def optimize_rrg(self, request: dict[str, Any]) -> dict[str, Any]:
     """Auto-tuned relative-rotation graph for an :class:`RRGRequest` payload."""
-
-    result = tuning.optimize_rrg(tuning.RRGRequest.model_validate(request))
-    # Stringify the Timestamp column so the frames are plain JSON records.
-    strength = result.relative_strength.with_columns(
-        pl.col("Timestamp").cast(pl.String)
-    )
-    momentum = result.relative_momentum.with_columns(
-        pl.col("Timestamp").cast(pl.String)
-    )
-    return {
-        "normalization_window": result.normalization_window,
-        "momentum_lookback": result.momentum_lookback,
-        "smoothing_span": result.smoothing_span,
-        "signal_to_noise": result.signal_to_noise,
-        "relative_strength": strength.to_dicts(),
-        "relative_momentum": momentum.to_dicts(),
-    }
+    req = tuning.RRGRequest.model_validate(request)
+    result = tuning.optimize_rrg(req)
+    rid = tuning.result_id("rrg", req)
+    result.save(_RESULTS_DIR / rid)
+    # result.to_dict() handles Timestamp serialization via _serialize_frame internally.
+    return {"result_id": rid, **result.to_dict()}
 
 
 def send_completion_confirmation(task_id: str) -> None:

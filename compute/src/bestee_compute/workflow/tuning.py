@@ -17,10 +17,13 @@ data and avoid the network.
 """
 
 import datetime as dt
+import hashlib
 import itertools
+import json
 import logging
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Self
 
 import numpy as np
@@ -88,6 +91,36 @@ def _prepare_panel(
 
 
 # ----------------------------------------------------------------------------
+# Persistence helpers
+# ----------------------------------------------------------------------------
+def _serialize_frame(df: pl.DataFrame) -> list[dict[str, Any]]:
+    """Convert a Polars DataFrame to a JSON-ready list of dicts.
+
+    Temporal columns (Datetime, Date, Duration, Time) are cast to strings so
+    the result is JSON-serializable without a custom encoder.
+    """
+    casts = [
+        pl.col(name).cast(pl.String)
+        for name, dtype in zip(df.columns, df.dtypes)
+        if dtype.base_type() in (pl.Datetime, pl.Date, pl.Duration, pl.Time)
+    ]
+    return (df.with_columns(casts) if casts else df).to_dicts()
+
+
+def result_id(analysis: str, request: BaseModel) -> str:
+    """Stable ``{analysis}_{sha256[:16]}`` key for a (analysis_type, request) pair.
+
+    The same request always produces the same ID, making the storage directory
+    a request-keyed cache -- re-running an identical analysis overwrites the
+    previous result.
+    """
+    payload = json.dumps(
+        request.model_dump(mode="json"), sort_keys=True, separators=(",", ":")
+    )
+    return f"{analysis}_{hashlib.sha256(payload.encode()).hexdigest()[:16]}"
+
+
+# ----------------------------------------------------------------------------
 # Clustering
 # ----------------------------------------------------------------------------
 class ClusteringRequest(BaseModel):
@@ -132,6 +165,22 @@ class ClusteringTuning:
             "silhouette": self.silhouette,
             "n_clusters": self.n_clusters,
         }
+
+    def to_dict(self) -> dict[str, Any]:
+        """Full JSON-serializable representation (all primitive fields)."""
+        return dict(self.simplified())
+
+    def save(self, path: Path) -> None:
+        """Persist to *path* as a single ``metadata.json`` file."""
+        path.mkdir(parents=True, exist_ok=True)
+        (path / "metadata.json").write_text(
+            json.dumps(self.to_dict(), separators=(",", ":"))
+        )
+
+    @classmethod
+    def load(cls, path: Path) -> ClusteringTuning:
+        """Reconstruct from a directory written by :meth:`save`."""
+        return cls(**json.loads((path / "metadata.json").read_text()))
 
 
 def optimize_clustering(
@@ -247,6 +296,89 @@ class RegimeTuning:
             "hmm_lag": self.hmm_lag,
             "mean_bic": self.mean_bic,
         }
+
+    def to_dict(self) -> dict[str, Any]:
+        """Full JSON-serializable representation including per-asset decoded states."""
+        return {
+            "labels": self.labels,
+            "residualization_window": self.residualization_window,
+            "normalization_window": self.normalization_window,
+            "hmm_lag": self.hmm_lag,
+            "mean_bic": self.mean_bic,
+            "results": {
+                ticker: {
+                    "current_regime": result.current_regime(),
+                    "n_states": result.n_states,
+                    "log_likelihood": result.log_likelihood,
+                    "bic": result.bic(),
+                    "regime_summary": result.regime_summary().to_dicts(),
+                    "states": _serialize_frame(result.states),
+                }
+                for ticker, result in self.results.items()
+            },
+        }
+
+    def save(self, path: Path) -> None:
+        """Persist to *path*: scalar params + numpy model params in
+        ``metadata.json``, per-asset state DataFrames as
+        ``states_{ticker}.parquet``."""
+        path.mkdir(parents=True, exist_ok=True)
+        ticker_meta: dict[str, Any] = {}
+        for ticker, result in self.results.items():
+            result.states.write_parquet(path / f"states_{ticker}.parquet")
+            ticker_meta[ticker] = {
+                "feature_names": result.feature_names,
+                "n_states": result.n_states,
+                "lag": result.lag,
+                "log_likelihood": result.log_likelihood,
+                "n_params": result.n_params,
+                "transition_matrix": result.transition_matrix.tolist(),
+                "start_prob": result.start_prob.tolist(),
+                "coef": result.coef.tolist(),
+                "covars": result.covars.tolist(),
+            }
+        (path / "metadata.json").write_text(
+            json.dumps(
+                {
+                    "labels": self.labels,
+                    "residualization_window": self.residualization_window,
+                    "normalization_window": self.normalization_window,
+                    "hmm_lag": self.hmm_lag,
+                    "mean_bic": self.mean_bic,
+                    "results": ticker_meta,
+                },
+                separators=(",", ":"),
+            )
+        )
+
+    @classmethod
+    def load(cls, path: Path) -> RegimeTuning:
+        """Reconstruct from a directory written by :meth:`save`."""
+        meta = json.loads((path / "metadata.json").read_text())
+        ticker_results = {
+            ticker: regimes.RegimeResult(
+                ticker=ticker,
+                states=pl.read_parquet(path / f"states_{ticker}.parquet"),
+                transition_matrix=np.array(data["transition_matrix"]),
+                start_prob=np.array(data["start_prob"]),
+                coef=np.array(data["coef"]),
+                covars=np.array(data["covars"]),
+                feature_names=data["feature_names"],
+                n_states=data["n_states"],
+                lag=data["lag"],
+                log_likelihood=data["log_likelihood"],
+                n_params=data["n_params"],
+            )
+            for ticker, data in meta["results"].items()
+        }
+        return cls(
+            labels=meta["labels"],
+            results=ticker_results,
+            residualization_window=meta["residualization_window"],
+            normalization_window=meta["normalization_window"],
+            hmm_lag=meta["hmm_lag"],
+            mean_bic=meta["mean_bic"],
+        )
 
 
 def optimize_regime(
@@ -413,6 +545,65 @@ class FamaFrenchTuning:
             },
         ).sort(["Specification", "Ticker"])
 
+    def to_dict(self) -> dict[str, Any]:
+        """Full JSON-serializable representation."""
+        return {
+            "factors_to_use": self.factors_to_use,
+            "specifications": [s.model_dump() for s in self.specifications],
+            "mean_adjusted_r_squared": self.mean_adjusted_r_squared,
+            "results": {
+                spec_name: {
+                    ticker: r.model_dump(mode="json")
+                    for ticker, r in spec_results.items()
+                }
+                for spec_name, spec_results in self.results.items()
+            },
+            "oos_residuals": self.oos_residuals.to_dicts(),
+        }
+
+    def save(self, path: Path) -> None:
+        """Persist to *path*: pydantic models in ``metadata.json``,
+        OOS residuals as ``oos_residuals.parquet``."""
+        path.mkdir(parents=True, exist_ok=True)
+        self.oos_residuals.write_parquet(path / "oos_residuals.parquet")
+        (path / "metadata.json").write_text(
+            json.dumps(
+                {
+                    "factors_to_use": self.factors_to_use,
+                    "mean_adjusted_r_squared": self.mean_adjusted_r_squared,
+                    "specifications": [s.model_dump() for s in self.specifications],
+                    "results": {
+                        spec_name: {
+                            ticker: r.model_dump(mode="json")
+                            for ticker, r in spec_results.items()
+                        }
+                        for spec_name, spec_results in self.results.items()
+                    },
+                },
+                separators=(",", ":"),
+            )
+        )
+
+    @classmethod
+    def load(cls, path: Path) -> FamaFrenchTuning:
+        """Reconstruct from a directory written by :meth:`save`."""
+        meta = json.loads((path / "metadata.json").read_text())
+        return cls(
+            factors_to_use=meta["factors_to_use"],
+            mean_adjusted_r_squared=meta["mean_adjusted_r_squared"],
+            specifications=[
+                fama.FamaFrenchSpecification(**s) for s in meta["specifications"]
+            ],
+            results={
+                spec_name: {
+                    ticker: fama.FamaFrenchResult(**r)
+                    for ticker, r in spec_results.items()
+                }
+                for spec_name, spec_results in meta["results"].items()
+            },
+            oos_residuals=pl.read_parquet(path / "oos_residuals.parquet"),
+        )
+
 
 def optimize_fama_french(
     request: FamaFrenchRequest,
@@ -524,6 +715,48 @@ class RRGTuning:
     signal_to_noise: float
     relative_strength: pl.DataFrame
     relative_momentum: pl.DataFrame
+
+    def to_dict(self) -> dict[str, Any]:
+        """Full JSON-serializable representation."""
+        return {
+            "normalization_window": self.normalization_window,
+            "momentum_lookback": self.momentum_lookback,
+            "smoothing_span": self.smoothing_span,
+            "signal_to_noise": self.signal_to_noise,
+            "relative_strength": _serialize_frame(self.relative_strength),
+            "relative_momentum": _serialize_frame(self.relative_momentum),
+        }
+
+    def save(self, path: Path) -> None:
+        """Persist to *path*: scalars in ``metadata.json``, DataFrames as
+        ``relative_strength.parquet`` and ``relative_momentum.parquet``."""
+        path.mkdir(parents=True, exist_ok=True)
+        self.relative_strength.write_parquet(path / "relative_strength.parquet")
+        self.relative_momentum.write_parquet(path / "relative_momentum.parquet")
+        (path / "metadata.json").write_text(
+            json.dumps(
+                {
+                    "normalization_window": self.normalization_window,
+                    "momentum_lookback": self.momentum_lookback,
+                    "smoothing_span": self.smoothing_span,
+                    "signal_to_noise": self.signal_to_noise,
+                },
+                separators=(",", ":"),
+            )
+        )
+
+    @classmethod
+    def load(cls, path: Path) -> RRGTuning:
+        """Reconstruct from a directory written by :meth:`save`."""
+        meta = json.loads((path / "metadata.json").read_text())
+        return cls(
+            normalization_window=meta["normalization_window"],
+            momentum_lookback=meta["momentum_lookback"],
+            smoothing_span=meta["smoothing_span"],
+            signal_to_noise=meta["signal_to_noise"],
+            relative_strength=pl.read_parquet(path / "relative_strength.parquet"),
+            relative_momentum=pl.read_parquet(path / "relative_momentum.parquet"),
+        )
 
 
 def optimize_rrg(

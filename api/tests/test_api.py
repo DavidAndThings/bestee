@@ -7,6 +7,7 @@ the right task name and payload are dispatched, and polling reads a mocked
 
 import json
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -300,3 +301,60 @@ def test_list_jobs_includes_timing_when_start_time_recorded() -> None:
     assert item["started_at"] == "2024-01-01T12:00:00+00:00"
     assert item["finished_at"] == "2024-01-01T12:00:05+00:00"
     assert item["elapsed_seconds"] == pytest.approx(5.0)
+
+
+# ---------------------------------------------------------------------------
+# GET /results  and  GET /results/{result_id}
+# ---------------------------------------------------------------------------
+
+
+def test_list_results_returns_empty_when_dir_absent() -> None:
+    with patch("routers.results._get_results_dir", return_value=Path("/no/such/dir")):
+        response = client.get("/results")
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+def test_get_result_returns_404_for_missing_result() -> None:
+    with patch("routers.results._get_results_dir", return_value=Path("/no/such/dir")):
+        response = client.get("/results/clustering_abc123def4")
+    assert response.status_code == 404
+
+
+def test_get_result_returns_422_for_unknown_analysis_type() -> None:
+    # Make the path appear to exist so we reach the loader dispatch.
+    mock_path = MagicMock(spec=Path)
+    mock_path.__truediv__ = lambda self, other: mock_path
+    mock_path.exists.return_value = True
+    (mock_path / "metadata.json").exists.return_value = True
+    with patch("routers.results._get_results_dir", return_value=mock_path):
+        response = client.get("/results/unknown_abc123def4")
+    assert response.status_code == 422
+
+
+def test_get_result_loads_and_returns_clustering_result() -> None:
+    from bestee_compute.workflow.tuning import ClusteringTuning
+
+    fake = ClusteringTuning(
+        labels={"AAA": 0, "BBB": 1},
+        residualization_window=20,
+        normalization_window=20,
+        n_components=1,
+        similarity_metric="corr",
+        silhouette=0.72,
+        n_clusters=2,
+    )
+    mock_path = MagicMock(spec=Path)
+    mock_path.__truediv__ = lambda self, other: mock_path
+    mock_path.exists.return_value = True
+    (mock_path / "metadata.json").exists.return_value = True
+    with (
+        patch("routers.results._get_results_dir", return_value=mock_path),
+        patch("routers.results._LOADERS", {"clustering": lambda _: fake}),
+    ):
+        response = client.get("/results/clustering_abc123def4")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["result_id"] == "clustering_abc123def4"
+    assert data["labels"] == {"AAA": 0, "BBB": 1}
+    assert data["silhouette"] == pytest.approx(0.72)
