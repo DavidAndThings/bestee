@@ -120,9 +120,21 @@ def test_poll_returns_result_when_successful() -> None:
     assert payload["state"] == "SUCCESS"
     assert payload["result"] == {"labels": {"AAA": 0}}
     assert payload["error"] is None
+    assert payload["result_id"] is None
     assert payload["started_at"] is None
     assert payload["finished_at"] is None
     assert payload["elapsed_seconds"] is None
+
+
+def test_poll_surfaces_result_id_on_success() -> None:
+    ar = _mock_async_result("SUCCESS", result={"result_id": "clustering_abc123"})
+    with (
+        patch("celery_client.AsyncResult", return_value=ar),
+        patch("redis_client.get_task_start_times", return_value={}),
+    ):
+        response = client.get("/jobs/task-123")
+    assert response.status_code == 200
+    assert response.json()["result_id"] == "clustering_abc123"
 
 
 def test_poll_returns_error_when_failed() -> None:

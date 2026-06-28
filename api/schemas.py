@@ -21,6 +21,7 @@ class TaskStatus(BaseModel):
 
     task_id: str
     state: str
+    result_id: str | None = None
     result: dict[str, Any] | None = None
     error: str | None = None
     started_at: str | None = None

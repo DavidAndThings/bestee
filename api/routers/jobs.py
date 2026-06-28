@@ -41,6 +41,11 @@ def _compute_elapsed(
         return None
 
 
+def _result_id(task_result: Any) -> str | None:
+    """Extract ``result_id`` from a task return dict, or ``None`` if absent."""
+    return task_result.get("result_id") if isinstance(task_result, dict) else None
+
+
 def _meta_to_status(meta: dict[str, Any], started_at: str | None = None) -> TaskStatus:
     """Convert a raw Celery result-backend entry to a :class:`TaskStatus`."""
     task_id: str = meta.get("task_id", "")
@@ -49,10 +54,12 @@ def _meta_to_status(meta: dict[str, Any], started_at: str | None = None) -> Task
     elapsed = _compute_elapsed(started_at, finished_at, state)
 
     if state == "SUCCESS":
+        task_result = meta.get("result")
         return TaskStatus(
             task_id=task_id,
             state=state,
-            result=meta.get("result"),
+            result_id=_result_id(task_result),
+            result=task_result,
             started_at=started_at,
             finished_at=finished_at,
             elapsed_seconds=elapsed,
@@ -120,6 +127,7 @@ def get_job(task_id: str) -> TaskStatus:
         return TaskStatus(
             task_id=task_id,
             state=state,
+            result_id=_result_id(result.result),
             result=result.result,
             started_at=started_at,
             finished_at=finished_at,
