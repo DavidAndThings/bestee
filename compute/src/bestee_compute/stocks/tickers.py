@@ -322,3 +322,86 @@ def get_ticker_details(
         .cols_align(align="left", columns=detail_cols)
         .sub_missing(missing_text="\u2014")
     )
+
+
+def _sic_key(value: object) -> str:
+    """Normalize a SIC code to a comparable string.
+
+    Trims whitespace and drops leading zeros for numeric codes so equivalent
+    forms match (``7372`` == ``"7372"``, and ``100`` == ``"0100"``).
+    """
+    text = str(value if value is not None else "").strip()
+    return str(int(text)) if text.isdigit() else text
+
+
+def get_tickers_by_sic_code(
+    sic_code: str | int,
+    *,
+    tickers: list[str] | None = None,
+    api_key: str | None = None,
+    market: str | None = "stocks",
+    ticker_type: str | None = "CS",
+    active: bool | None = True,
+    limit: int = 1000,
+    max_workers: int = 10,
+) -> list[str]:
+    """Return every ticker whose company SIC code equals *sic_code*.
+
+    The Massive ``list_tickers`` endpoint exposes no SIC filter, so the code
+    must be read from each company's :class:`TickerDetails`.  This function
+    therefore (1) takes a candidate universe -- *tickers* if given, otherwise
+    every symbol matching *market*/*ticker_type*/*active* -- and (2) fetches
+    their details concurrently and keeps those whose ``sic_code`` matches.
+
+    Step 2 issues one details request per candidate, so the default universe
+    (US common stocks) is several thousand calls.  Pass *tickers* to scope the
+    search when you already have a candidate set.
+
+    Args:
+        sic_code: The SIC code to match (``"7372"`` or ``7372``).
+        tickers: Candidate symbols to filter.  When *None*, the universe is
+            fetched from the Massive API.
+        api_key: Massive API key.  Falls back to the ``MASSIVE_API_KEY``
+            environment variable when *None*.
+        market: Market filter for the fetched universe (default ``"stocks"``).
+        ticker_type: Ticker-type filter for the fetched universe (default
+            ``"CS"``, common stock).  Pass *None* for every type.
+        active: If *True* only actively-traded tickers form the universe.
+        limit: Page size when fetching the universe (max 1000).
+        max_workers: Number of concurrent details requests.
+
+    Returns:
+        A sorted list of the matching ticker symbols.
+
+    Raises:
+        RuntimeError: If no API key is available.
+    """
+    target = _sic_key(sic_code)
+    if tickers is None:
+        candidates = [
+            t.ticker
+            for t in _fetch_tickers(
+                api_key=api_key,
+                market=market,
+                ticker_type=ticker_type,
+                active=active,
+                limit=limit,
+            )
+        ]
+    else:
+        candidates = list(tickers)
+
+    client = get_client(api_key)
+    logger.info(
+        "Filtering %d candidate tickers for SIC code %s", len(candidates), target
+    )
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        details = pool.map(lambda s: _fetch_one_ticker_detail(client, s), candidates)
+
+    matches = sorted(
+        detail.ticker
+        for detail in details
+        if detail is not None and _sic_key(getattr(detail, "sic_code", None)) == target
+    )
+    logger.info("Found %d tickers with SIC code %s", len(matches), target)
+    return matches
