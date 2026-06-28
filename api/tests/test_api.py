@@ -41,8 +41,7 @@ SUBMIT_CASES = [
         "tuning.optimize_fama_french",
         {
             "tickers": ["AAA"],
-            "start_date": "2020-01-01",
-            "end_date": "2020-12-31",
+            "intervals": [{"start_date": "2020-01-01", "end_date": "2020-12-31"}],
         },
     ),
     (

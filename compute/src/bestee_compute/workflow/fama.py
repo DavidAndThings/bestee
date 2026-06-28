@@ -273,6 +273,8 @@ def get_residuals(
     config: AnalysisConfig,
     date: str,
     specifications: Sequence[FamaFrenchSpecification],
+    *,
+    variables: Mapping[str, pl.DataFrame] | None = None,
 ) -> pl.DataFrame:
     """Out-of-sample Fama-French residuals on one date, per specification.
 
@@ -287,6 +289,9 @@ def get_residuals(
     :meth:`FamaFrenchSpecification.verify_out_of_sample` -- and a trading day
     for which factor data exists (Ken French lags ~1-2 months). The
     factor/return data is fetched once and shared across all specifications.
+
+    Pass pre-built *variables* (from :func:`get_variables`) to skip the
+    network fetch; *config* is only used when *variables* is ``None``.
 
     Returns:
         A long ``[Ticker, Specification, Residual, ZScore, PValue]`` frame --
@@ -305,7 +310,8 @@ def get_residuals(
     target = dt.date.fromisoformat(date[:10])
     for specification in specifications:
         specification.verify_out_of_sample(target)
-    variables = get_variables(config)
+    if variables is None:
+        variables = get_variables(config)
     records = [
         record
         for specification in specifications

@@ -12,28 +12,36 @@ environment must provide the relevant API keys (``MASSIVE_API_KEY``, and
 ``FRED_API_KEY`` for the Fama-French factors).
 """
 
+import os
+from dataclasses import asdict
 from typing import Any
 
+import polars as pl
+import resend
+from bestee_compute.workflow import tuning
 from celery import shared_task
+from dotenv import load_dotenv
+
+load_dotenv()
+resend.api_key = os.environ.get("RESEND_API_KEY")
 
 
-@shared_task(name="tuning.optimize_clustering")
-def optimize_clustering(request: dict[str, Any]) -> dict[str, Any]:
+@shared_task(name="tuning.optimize_clustering", bind=True)
+def optimize_clustering(self, request: dict[str, Any]) -> dict[str, Any]:
     """Auto-tuned spectral clustering for a :class:`ClusteringRequest` payload."""
-    from dataclasses import asdict
-
-    from bestee_compute.workflow import tuning
 
     result = tuning.optimize_clustering(
         tuning.ClusteringRequest.model_validate(request)
     )
+    send_completion_confirmation(
+        self.request.id,
+    )
     return asdict(result)
 
 
-@shared_task(name="tuning.optimize_regime")
-def optimize_regime(request: dict[str, Any]) -> dict[str, Any]:
+@shared_task(name="tuning.optimize_regime", bind=True)
+def optimize_regime(self, request: dict[str, Any]) -> dict[str, Any]:
     """Auto-tuned per-asset regime detection for a :class:`RegimeRequest` payload."""
-    from bestee_compute.workflow import tuning
 
     result = tuning.optimize_regime(tuning.RegimeRequest.model_validate(request))
     # The fitted ``RegimeResult`` objects carry DataFrames / arrays, so only the
@@ -47,29 +55,35 @@ def optimize_regime(request: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-@shared_task(name="tuning.optimize_fama_french")
-def optimize_fama_french(request: dict[str, Any]) -> dict[str, Any]:
+@shared_task(name="tuning.optimize_fama_french", bind=True)
+def optimize_fama_french(self, request: dict[str, Any]) -> dict[str, Any]:
     """Auto-tuned Fama-French fit for a :class:`FamaFrenchRequest` payload."""
-    from bestee_compute.workflow import tuning
 
     result = tuning.optimize_fama_french(
         tuning.FamaFrenchRequest.model_validate(request)
     )
     return {
         "factors_to_use": result.factors_to_use,
+        "specifications": [spec.model_dump() for spec in result.specifications],
         "mean_adjusted_r_squared": result.mean_adjusted_r_squared,
         "results": {
-            ticker: model.model_dump(mode="json")
-            for ticker, model in result.results.items()
+            spec_name: {
+                ticker: model.model_dump(mode="json")
+                for ticker, model in spec_results.items()
+            }
+            for spec_name, spec_results in result.results.items()
         },
+        "oos_residuals": (
+            result.oos_residuals.to_dicts()
+            if result.oos_residuals is not None
+            else None
+        ),
     }
 
 
-@shared_task(name="tuning.optimize_rrg")
-def optimize_rrg(request: dict[str, Any]) -> dict[str, Any]:
+@shared_task(name="tuning.optimize_rrg", bind=True)
+def optimize_rrg(self, request: dict[str, Any]) -> dict[str, Any]:
     """Auto-tuned relative-rotation graph for an :class:`RRGRequest` payload."""
-    import polars as pl
-    from bestee_compute.workflow import tuning
 
     result = tuning.optimize_rrg(tuning.RRGRequest.model_validate(request))
     # Stringify the Timestamp column so the frames are plain JSON records.
@@ -87,3 +101,14 @@ def optimize_rrg(request: dict[str, Any]) -> dict[str, Any]:
         "relative_strength": strength.to_dicts(),
         "relative_momentum": momentum.to_dicts(),
     }
+
+
+def send_completion_confirmation(task_id: str) -> None:
+    resend.Emails.send(
+        {
+            "from": "onboarding@resend.dev",
+            "to": "easyd93@proton.me",
+            "subject": "Bestee Task Completed",
+            "html": "<p>Congrats on sending your <strong>first email</strong>!</p>",
+        }
+    )

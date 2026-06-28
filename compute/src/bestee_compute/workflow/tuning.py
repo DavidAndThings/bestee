@@ -16,11 +16,12 @@ input. Pass ``panel=`` (or ``variables=`` for Fama-French) to reuse pre-fetched
 data and avoid the network.
 """
 
+import datetime as dt
 import itertools
 import logging
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Self
+from typing import Any, Self
 
 import numpy as np
 import polars as pl
@@ -120,6 +121,17 @@ class ClusteringTuning:
     similarity_metric: SimilarityMetric
     silhouette: float
     n_clusters: int
+
+    def simplified(self) -> Mapping[str, Any]:
+        return {
+            "labels": self.labels,
+            "residualization_window": self.residualization_window,
+            "normalization_window": self.normalization_window,
+            "n_components": self.n_components,
+            "similarity_metric": self.similarity_metric,
+            "silhouette": self.silhouette,
+            "n_clusters": self.n_clusters,
+        }
 
 
 def optimize_clustering(
@@ -227,6 +239,15 @@ class RegimeTuning:
     hmm_lag: int
     mean_bic: float
 
+    def simplified(self) -> Mapping[str, Any]:
+        return {
+            "labels": self.labels,
+            "residualization_window": self.residualization_window,
+            "normalization_window": self.normalization_window,
+            "hmm_lag": self.hmm_lag,
+            "mean_bic": self.mean_bic,
+        }
+
 
 def optimize_regime(
     request: RegimeRequest, *, panel: pl.DataFrame | None = None
@@ -282,22 +303,59 @@ def optimize_regime(
 # ----------------------------------------------------------------------------
 # Fama-French factor model
 # ----------------------------------------------------------------------------
-class FamaFrenchRequest(BaseModel):
-    """User inputs for an auto-tuned Fama-French fit: the universe and the
-    estimation window."""
+class DateInterval(BaseModel):
+    """One estimation window ``[start_date, end_date]`` (inclusive ISO YYYY-MM-DD)."""
 
-    tickers: Sequence[str] = Field(min_length=1)
     start_date: str
     end_date: str
 
 
+class FamaFrenchRequest(BaseModel):
+    """User inputs for an auto-tuned Fama-French fit.
+
+    The model is fit over each ``intervals`` window and the factor count
+    (FF3 / Carhart-4 / FF5 / FF6) that maximises mean adjusted R\u00b2 across all
+    intervals is chosen.  If ``oos_date`` is supplied (must be strictly after
+    every interval's ``end_date``), out-of-sample residuals for that date are
+    computed and included in the result.
+    """
+
+    tickers: Sequence[str] = Field(min_length=1)
+    intervals: Sequence[DateInterval] = Field(min_length=1)
+    oos_date: str | None = None
+
+    @model_validator(mode="after")
+    def _oos_date_after_all_intervals(self) -> Self:
+        if self.oos_date is None:
+            return self
+        oos = dt.date.fromisoformat(self.oos_date[:10])
+        for interval in self.intervals:
+            end = dt.date.fromisoformat(interval.end_date[:10])
+            if oos <= end:
+                raise ValueError(
+                    f"oos_date {self.oos_date!r} must be strictly after every "
+                    f"interval's end_date (got interval ending {interval.end_date!r})"
+                )
+        return self
+
+
 @dataclass
 class FamaFrenchTuning:
-    """Best factor model found, with the per-ticker fits that produced it."""
+    """Best factor model found across all requested estimation intervals.
+
+    ``specifications`` holds one :class:`fama.FamaFrenchSpecification` per
+    requested interval, all using the chosen ``factors_to_use``.  ``results``
+    maps each specification's name to its per-ticker
+    :class:`fama.FamaFrenchResult`.  When the request includes an ``oos_date``,
+    ``oos_residuals`` carries the long
+    ``[Ticker, Specification, Residual, ZScore, PValue]`` frame.
+    """
 
     factors_to_use: int
-    results: Mapping[str, fama.FamaFrenchResult]
+    specifications: list[fama.FamaFrenchSpecification]
+    results: Mapping[str, Mapping[str, fama.FamaFrenchResult]]
     mean_adjusted_r_squared: float
+    oos_residuals: pl.DataFrame | None
 
 
 def optimize_fama_french(
@@ -305,44 +363,78 @@ def optimize_fama_french(
     *,
     variables: Mapping[str, pl.DataFrame] | None = None,
 ) -> FamaFrenchTuning:
-    """Pick the factor count (FF3 / Carhart-4 / FF5 / FF6) that best explains the
-    cross-section by mean adjusted R-squared.
+    """Pick the Fama-French factor count (FF3/4/5/6) that maximises mean
+    adjusted R\u00b2 across all requested estimation intervals.
 
-    Adjusted R-squared penalizes extra factors, so the winner is the most
-    parsimonious model that still fits -- the proper "remaining parameter" to
-    optimize. The regression-ready variables are built once and reused.
+    One :class:`fama.FamaFrenchSpecification` is created per interval with the
+    winning factor count.  If ``request.oos_date`` is set, out-of-sample
+    residuals for that date are computed across all fitted specifications and
+    attached to the result.
     """
+    config = AnalysisConfig(
+        tickers=list(request.tickers),
+        start_date=min(i.start_date for i in request.intervals),
+        end_date=max(
+            request.oos_date or "",
+            max(i.end_date for i in request.intervals),
+        ),
+    )
     if variables is None:
-        config = AnalysisConfig(
-            tickers=list(request.tickers),
-            start_date=request.start_date,
-            end_date=request.end_date,
-        )
         variables = fama.get_variables(config)
+
     best: FamaFrenchTuning | None = None
     for factors in _FACTOR_COUNTS:
-        specification = fama.FamaFrenchSpecification(
-            start_date=request.start_date,
-            end_date=request.end_date,
-            factors_to_use=factors,
-        )
-        results = fama._fit(variables, specification)
-        if not results:
+        specs = [
+            fama.FamaFrenchSpecification(
+                start_date=interval.start_date,
+                end_date=interval.end_date,
+                factors_to_use=factors,
+            )
+            for interval in request.intervals
+        ]
+        interval_results: dict[str, dict[str, fama.FamaFrenchResult]] = {}
+        adj_r_squareds: list[float] = []
+        for spec in specs:
+            spec_results = fama._fit(variables, spec)
+            if not spec_results:
+                continue
+            interval_results[spec.name] = spec_results
+            adj_r_squareds.extend(r.adj_r_squared for r in spec_results.values())
+        if not adj_r_squareds:
             continue
-        mean_adj = float(np.mean([r.adj_r_squared for r in results.values()]))
+        mean_adj = float(np.mean(adj_r_squareds))
         if best is None or mean_adj > best.mean_adjusted_r_squared:
             best = FamaFrenchTuning(
                 factors_to_use=factors,
-                results=results,
+                specifications=specs,
+                results=interval_results,
                 mean_adjusted_r_squared=mean_adj,
+                oos_residuals=None,
             )
+
     if best is None:
-        raise ValueError("No Fama-French model could be fit on the given window.")
+        raise ValueError("No Fama-French model could be fit on any interval.")
+
+    if request.oos_date is not None:
+        best = FamaFrenchTuning(
+            factors_to_use=best.factors_to_use,
+            specifications=best.specifications,
+            results=best.results,
+            mean_adjusted_r_squared=best.mean_adjusted_r_squared,
+            oos_residuals=fama.get_residuals(
+                config,
+                request.oos_date,
+                best.specifications,
+                variables=variables,
+            ),
+        )
+
     logger.info(
-        "fama-french: FF%d, mean adj R^2 %.3f (%d tickers)",
+        "fama-french: FF%d, mean adj R^2 %.3f (%d interval(s), %d tickers)",
         best.factors_to_use,
         best.mean_adjusted_r_squared,
-        len(best.results),
+        len(best.specifications),
+        len(request.tickers),
     )
     return best
 
