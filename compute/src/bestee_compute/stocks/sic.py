@@ -172,22 +172,9 @@ def _load_cache() -> list[dict[str, str]] | None:
 # ── Public API ───────────────────────────────────────────────────────
 
 
-def get_sic_codes() -> GT:
-    """Return the complete SIC code list as a GT table.
+def get_sic_codes_df() -> pl.DataFrame:
+    """Return the complete SIC code list as a Polars DataFrame."""
 
-    On the first call the data is scraped from the SEC website and
-    cached locally.  Subsequent calls use the cache.  If scraping fails
-    (network error, rate limit, HTML change, etc.) the function falls
-    back to the local cache — either a previous successful scrape or the
-    bundled snapshot shipped with the package.
-
-    Returns:
-        A :class:`great_tables.GT` table with columns for SIC Code,
-        Industry Title, and Office.
-
-    Raises:
-        RuntimeError: If scraping fails **and** no cache is available.
-    """
     rows: list[dict[str, str]] | None = None
 
     # 1. Try scraping from the SEC website.
@@ -222,14 +209,34 @@ def get_sic_codes() -> GT:
             for r in rows
         ]
     )
-
     logger.info("Built SIC codes GT table with %d rows", len(rows))
+    return df
+
+
+def get_sic_codes() -> GT:
+    """Return the complete SIC code list as a GT table.
+
+    On the first call the data is scraped from the SEC website and
+    cached locally.  Subsequent calls use the cache.  If scraping fails
+    (network error, rate limit, HTML change, etc.) the function falls
+    back to the local cache — either a previous successful scrape or the
+    bundled snapshot shipped with the package.
+
+    Returns:
+        A :class:`great_tables.GT` table with columns for SIC Code,
+        Industry Title, and Office.
+
+    Raises:
+        RuntimeError: If scraping fails **and** no cache is available.
+    """
+
+    df = get_sic_codes_df()
 
     return (
-        GT(df)
+        GT(get_sic_codes_df())
         .tab_header(
             title="SIC Codes",
-            subtitle=f"{len(rows)} Standard Industrial Classification codes",
+            subtitle=f"{df.height} Standard Industrial Classification codes",
         )
         .cols_align(align="left", columns=["SIC Code", "Industry Title", "Office"])
     )

@@ -18,6 +18,7 @@ from massive.rest.models import RelatedCompany, Ticker, TickerDetails
 import bestee_compute.resources
 from bestee_compute.client import get_client
 from bestee_compute.stocks import columns as cols
+from bestee_compute.stocks.sic import get_sic_codes_df
 
 logger = logging.getLogger(__name__)
 
@@ -460,6 +461,48 @@ def build_ticker_sic_index(
             index[ticker] = sic
     logger.info("Built ticker->SIC index with %d entries", len(index))
     return index
+
+
+def get_tickers_by_sic_category_name(
+    name: str,
+    *,
+    index: Mapping[str, str] | None = None,
+    refresh: bool = False,
+    api_key: str | None = None,
+) -> list[str]:
+    """Return every ticker whose SIC industry title contains *name*.
+
+    *name* is matched case-insensitively as a literal substring against the SEC
+    SIC industry titles (which are upper-case), and tickers from **all** matching
+    SIC codes are returned -- a keyword such as ``"software"`` maps to several
+    codes.  Returns an empty list when no industry title matches.
+
+    Args:
+        name: Substring to search for in the SIC industry titles.
+        index: A ``{ticker: sic_code}`` map to filter.  Defaults to the bundled
+            cache (or a fresh build when *refresh* is *True*).
+        refresh: Rebuild the index from the Massive API instead of the cache.
+        api_key: Massive API key (only used when *refresh* is *True*).
+
+    Returns:
+        A sorted list of the matching ticker symbols.
+    """
+    titles = get_sic_codes_df()
+    matched = titles.filter(
+        pl.col("Industry Title")
+        .str.to_lowercase()
+        .str.contains(name.lower(), literal=True)
+    )
+    target_codes = {_sic_key(code) for code in matched.get_column("SIC Code").to_list()}
+    if not target_codes:
+        return []
+    if index is None:
+        index = (
+            build_ticker_sic_index(api_key=api_key)
+            if refresh
+            else _load_ticker_sic_index()
+        )
+    return sorted(ticker for ticker, sic in index.items() if sic in target_codes)
 
 
 def get_tickers_by_sic_code(
