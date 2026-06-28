@@ -1,0 +1,21 @@
+# logrotate config for bestee application logs.
+# Install to /etc/logrotate.d/bestee (it is picked up by the daily cron/timer).
+#
+# Rotation strategy: `create` (rename + new file) rather than `copytruncate`.
+# The app's WatchedFileHandler reopens the file on the next emit when it sees the
+# inode change, so no reload signal is needed and no lines are lost. The audit
+# log is opened append-only per record, so it also picks up the new file.
+#
+# Adjust the path and the `su`/`create` owner to match LOG_DIR and the service
+# user from the systemd units.
+
+/var/log/bestee/*.log /var/log/bestee/audit.jsonl {
+    su bestee bestee
+    daily
+    rotate 14
+    compress
+    delaycompress
+    missingok
+    notifempty
+    create 0640 bestee bestee
+}

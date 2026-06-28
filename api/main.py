@@ -6,6 +6,10 @@ result. The app is a thin producer -- it dispatches tasks by name and never
 imports the analytics stack.
 """
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+
+from bestee_compute.logging_config import configure_logging
 from fastapi import Depends, FastAPI, Request
 from fastapi.responses import JSONResponse
 from kombu.exceptions import OperationalError
@@ -14,7 +18,15 @@ from redis.exceptions import RedisError
 from auth import require_auth
 from routers import clustering, fama_french, jobs, regime, results, rrg
 
-app = FastAPI(title="bestee tuning API", version="0.1.0")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    """Persist logs to ``LOG_DIR`` (stdout + file) for the server's lifetime."""
+    configure_logging("api")
+    yield
+
+
+app = FastAPI(title="bestee tuning API", version="0.1.0", lifespan=lifespan)
 
 _auth = [Depends(require_auth)]
 

@@ -29,6 +29,13 @@ Poll `GET /jobs/{task_id}` until `state` is `SUCCESS` (carries `result`) or
 | `DO_REDIS_CONNECTION` | Yes | Redis URL shared with the `queue` worker (broker + result backend). |
 | `CLERK_JWKS_URL` | Yes | Clerk JWKS endpoint used to verify session tokens. Find it in the Clerk dashboard under **API Keys → Advanced → JWKS URL** (format: `https://<instance>.clerk.accounts.dev/.well-known/jwks.json`). |
 | `RESULTS_DIR` | No | Directory where tuning results are persisted (default `./results`). Must be the same path the `queue` worker writes to. |
+| `LOG_DIR` | No | Directory for persisted logs, `api.log` (default `logs`). |
+| `LOG_LEVEL` | No | Root log level (default `INFO`). |
+| `LOG_FORMAT` | No | `json` (default, one object per line) or `text`. |
+
+Logs are written to both stdout (captured by `systemd`/`journald`) and
+`${LOG_DIR}/api.log`. See [`deploy/`](../deploy/README.md) for droplet
+`systemd` + `logrotate` templates.
 
 ## Run
 

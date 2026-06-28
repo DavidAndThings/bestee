@@ -1,9 +1,14 @@
 import os
 from datetime import UTC, datetime
+from typing import Any
 
+from bestee_compute.logging_config import configure_logging
 from celery import Celery
-from celery.signals import task_prerun
+from celery.signals import setup_logging, task_prerun
 from dotenv import load_dotenv
+
+# Importing ``audit`` registers its task signal handlers (the audit trail).
+import audit  # noqa: E402, F401  (side-effect import; must follow celery import)
 
 
 def get_celery_app() -> Celery:
@@ -38,6 +43,17 @@ def get_celery_app() -> Celery:
 
 
 app = get_celery_app()
+
+
+@setup_logging.connect
+def _configure_logging(**_: Any) -> None:
+    """Own the worker's logging so task logs persist to ``LOG_DIR``.
+
+    Connecting a receiver to ``setup_logging`` disables Celery's own logging
+    hijack, letting :func:`configure_logging` install the stdout + file handlers
+    on the root logger.  Forked children inherit the configuration.
+    """
+    configure_logging("queue")
 
 
 @task_prerun.connect

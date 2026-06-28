@@ -37,3 +37,11 @@ htmlcov/
 compute/scripts/*.parquet
 compute/scripts/*.csv
 compute/scripts/*.png
+
+# Persisted application logs and the per-task audit trail (LOG_DIR)
+logs/
+*.log
+audit.jsonl
+
+# Persisted tuning results (RESULTS_DIR)
+results/

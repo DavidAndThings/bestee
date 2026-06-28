@@ -1,0 +1,28 @@
+# systemd unit for the FastAPI server (the tuning API).
+# Install to /etc/systemd/system/bestee-api.service, then:
+#   sudo systemctl daemon-reload && sudo systemctl enable --now bestee-api
+# Logs: journalctl -u bestee-api -f   (stdout)  and  /var/log/bestee/api.log
+#
+# Adjust User, paths, host/port, and worker count. Front with nginx/Caddy for
+# TLS. Secrets are read from the repo-root .env by the app (python-dotenv);
+# only LOG_DIR is set here so files land in /var/log/bestee.
+
+[Unit]
+Description=bestee tuning API (FastAPI/uvicorn)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=bestee
+Group=bestee
+WorkingDirectory=/opt/bestee/api
+Environment=LOG_DIR=/var/log/bestee
+Environment=LOG_LEVEL=INFO
+Environment=LOG_FORMAT=json
+ExecStart=/opt/bestee/api/.venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
