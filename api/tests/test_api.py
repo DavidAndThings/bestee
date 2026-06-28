@@ -118,7 +118,6 @@ def test_poll_returns_result_when_successful() -> None:
     payload = response.json()
     assert payload["task_id"] == "task-123"
     assert payload["state"] == "SUCCESS"
-    assert payload["result"] == {"labels": {"AAA": 0}}
     assert payload["error"] is None
     assert payload["result_id"] is None
     assert payload["started_at"] is None
@@ -148,7 +147,6 @@ def test_poll_returns_error_when_failed() -> None:
     payload = response.json()
     assert payload["state"] == "FAILURE"
     assert payload["error"] == "boom"
-    assert payload["result"] is None
 
 
 def test_poll_returns_state_only_when_pending() -> None:
@@ -161,7 +159,6 @@ def test_poll_returns_state_only_when_pending() -> None:
     assert response.status_code == 200
     payload = response.json()
     assert payload["state"] == "PENDING"
-    assert payload["result"] is None
     assert payload["error"] is None
 
 
@@ -232,7 +229,6 @@ def test_list_jobs_returns_all_statuses() -> None:
     # keys are sorted, so aaa comes first
     assert data["items"][0]["task_id"] == "aaa"
     assert data["items"][0]["state"] == "SUCCESS"
-    assert data["items"][0]["result"] == {"x": 1}
     assert data["items"][1]["state"] == "PENDING"
 
 
@@ -256,7 +252,6 @@ def test_list_jobs_failure_entry_formats_error() -> None:
     assert item["state"] == "FAILURE"
     assert "ValueError" in item["error"]
     assert "bad input" in item["error"]
-    assert item["result"] is None
 
 
 def test_list_jobs_pagination() -> None:

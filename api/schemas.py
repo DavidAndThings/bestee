@@ -5,9 +5,7 @@ The *request* models are reused directly from ``bestee_compute.workflow.tuning``
 single source of truth. Only the API-specific response models live here.
 """
 
-from typing import Any
-
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 
 class TaskHandle(BaseModel):
@@ -22,12 +20,6 @@ class TaskStatus(BaseModel):
     task_id: str
     state: str
     result_id: str | None = None
-    result: dict[str, Any] | None = Field(
-        default=None,
-        deprecated=(
-            "result is deprecated; use result_id and GET /results/{result_id} instead."
-        ),
-    )
     error: str | None = None
     started_at: str | None = None
     finished_at: str | None = None
