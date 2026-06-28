@@ -3,10 +3,13 @@
 import importlib.resources
 import json
 import logging
+import os
 from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from typing import cast
 
+import platformdirs
 import polars as pl
 from great_tables import GT
 from massive import RESTClient
@@ -332,6 +335,7 @@ def get_ticker_details(
 # ── Ticker → SIC code index (bundled cache) ──────────────────────────
 
 _TICKER_SIC_RESOURCE = "ticker_sic_codes.json"
+_USER_CACHE_DIR = Path(platformdirs.user_cache_dir("bestee"))
 _ticker_sic_index: dict[str, str] | None = None
 
 
@@ -345,17 +349,60 @@ def _sic_key(value: object) -> str:
     return str(int(text)) if text.isdigit() else text
 
 
+def _user_ticker_sic_cache() -> Path:
+    """Path to the writable cache of ticker->SIC pairs discovered at runtime."""
+    return _USER_CACHE_DIR / _TICKER_SIC_RESOURCE
+
+
 def _load_ticker_sic_index() -> dict[str, str]:
-    """Load the bundled ``ticker -> SIC code`` map, cached after first read."""
+    """Return the ``ticker -> SIC code`` map, cached in memory after first read.
+
+    The bundled snapshot shipped with the package is overlaid with any entries
+    discovered at runtime and saved to the writable user cache, so codes learned
+    from the related-companies endpoint persist across runs.
+    """
     global _ticker_sic_index
     if _ticker_sic_index is None:
         ref = importlib.resources.files(bestee_compute.resources).joinpath(
             _TICKER_SIC_RESOURCE
         )
-        _ticker_sic_index = cast(
-            dict[str, str], json.loads(ref.read_text(encoding="utf-8"))
-        )
+        index = cast(dict[str, str], json.loads(ref.read_text(encoding="utf-8")))
+        user_cache = _user_ticker_sic_cache()
+        if user_cache.is_file():
+            try:
+                index.update(json.loads(user_cache.read_text(encoding="utf-8")))
+            except OSError, json.JSONDecodeError:
+                logger.warning("Ignoring unreadable SIC cache at %s", user_cache)
+        _ticker_sic_index = index
     return _ticker_sic_index
+
+
+def _remember_sic_codes(new_entries: Mapping[str, str]) -> None:
+    """Persist runtime-discovered ``ticker -> SIC`` pairs to the user cache.
+
+    Updates the in-memory index and merges *new_entries* into the writable
+    user-cache file (written atomically via a temp file + rename).  Failures are
+    logged and swallowed so caching never breaks a lookup.
+    """
+    if not new_entries:
+        return
+    _load_ticker_sic_index().update(new_entries)
+    path = _user_ticker_sic_cache()
+    merged: dict[str, str] = {}
+    if path.is_file():
+        try:
+            merged = json.loads(path.read_text(encoding="utf-8"))
+        except OSError, json.JSONDecodeError:
+            logger.warning("Ignoring unreadable SIC cache at %s", path)
+    merged.update(new_entries)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_name(f"{path.stem}.{os.getpid()}.tmp")
+        tmp.write_text(json.dumps(merged, sort_keys=True) + "\n", encoding="utf-8")
+        tmp.replace(path)
+        logger.info("Cached %d new ticker->SIC entries to %s", len(new_entries), path)
+    except OSError:
+        logger.warning("Failed to write SIC cache at %s", path)
 
 
 def build_ticker_sic_index(
@@ -468,12 +515,24 @@ def get_related_tickers(ticker: str, *, api_key: str | None = None) -> list[str]
     return [rc.ticker for rc in related if rc.ticker]
 
 
-def _sic_lookup(ticker: str, index: Mapping[str, str], client: RESTClient) -> str:
-    """SIC code for *ticker* from *index*, falling back to a live details call."""
+def _sic_lookup(
+    ticker: str,
+    index: Mapping[str, str],
+    client: RESTClient,
+    discovered: dict[str, str] | None = None,
+) -> str:
+    """SIC code for *ticker* from *index*, falling back to a live details call.
+
+    A SIC code fetched live (one absent from *index*) is recorded in
+    *discovered* when given, so the caller can persist newly-seen tickers.
+    """
     if ticker in index:
         return index[ticker]
     detail = _fetch_one_ticker_detail(client, ticker)
-    return _sic_key(getattr(detail, "sic_code", None)) if detail else ""
+    sic = _sic_key(getattr(detail, "sic_code", None)) if detail else ""
+    if sic and discovered is not None:
+        discovered[ticker] = sic
+    return sic
 
 
 def related_tickers_sharing_sic(
@@ -497,12 +556,25 @@ def related_tickers_sharing_sic(
     Returns:
         A sorted list of related tickers with the same SIC code as *ticker*
         (empty when the seed's SIC code is unknown).
+
+    Side effects:
+        When the default cache is used (no *index* given), SIC codes fetched
+        live for tickers absent from the cache -- typically newly-seen symbols
+        from the related-companies endpoint -- are written back to the user
+        cache so subsequent lookups are offline.
     """
-    idx = index if index is not None else _load_ticker_sic_index()
+    use_cache = index is None
+    idx = _load_ticker_sic_index() if use_cache else index
     client = get_client(api_key)
-    seed_sic = _sic_lookup(ticker, idx, client)
+    discovered: dict[str, str] = {}
+    seed_sic = _sic_lookup(ticker, idx, client, discovered)
     if not seed_sic:
         logger.info("No SIC code known for %s; cannot compare peers", ticker)
         return []
     related = get_related_tickers(ticker, api_key=api_key)
-    return sorted(r for r in related if _sic_lookup(r, idx, client) == seed_sic)
+    matches = sorted(
+        r for r in related if _sic_lookup(r, idx, client, discovered) == seed_sic
+    )
+    if use_cache:
+        _remember_sic_codes(discovered)
+    return matches

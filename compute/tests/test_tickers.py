@@ -5,10 +5,14 @@ these run offline and assert the cache filtering, index building, and the
 related-company SIC comparison.
 """
 
+import json
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
 from massive.rest.models import TickerDetails
 
+from bestee_compute.stocks import tickers as tk
 from bestee_compute.stocks.tickers import (
     _sic_key,
     build_ticker_sic_index,
@@ -108,3 +112,61 @@ def test_related_sharing_sic_empty_when_seed_sic_unknown(
     # Seed not in the index and (mock) details return nothing useful.
     with patch(_DETAIL_PATCH, return_value=None):
         assert related_tickers_sharing_sic("UNKNOWN", index={}) == []
+
+
+# ── cache updates from runtime discovery ──────────────────────────────
+
+
+def test_load_index_overlays_user_cache(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(tk, "_ticker_sic_index", None)  # force a fresh load
+    user_cache = tmp_path / "ticker_sic_codes.json"
+    user_cache.write_text(json.dumps({"NEWCO": "9999", "AAPL": "1111"}))
+    monkeypatch.setattr(tk, "_user_ticker_sic_cache", lambda: user_cache)
+    index = tk._load_ticker_sic_index()
+    assert index["NEWCO"] == "9999"  # new entry from the user cache
+    assert index["AAPL"] == "1111"  # user cache overrides the bundled snapshot
+    assert index["MSFT"] == "7372"  # bundled snapshot still present
+
+
+@patch(_DETAIL_PATCH)
+@patch(_CLIENT_PATCH)
+def test_discovered_related_tickers_are_persisted(
+    mock_get_client: MagicMock,
+    mock_detail: MagicMock,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = mock_get_client.return_value
+    client.get_related_companies.return_value = [MagicMock(ticker="NEW")]
+    mock_detail.side_effect = lambda _client, symbol: _detail(symbol, 7372)
+    # Seed cached as 7372; NEW is absent so its SIC is fetched live.
+    monkeypatch.setattr(tk, "_ticker_sic_index", {"MSFT": "7372"})
+    user_cache = tmp_path / "ticker_sic_codes.json"
+    monkeypatch.setattr(tk, "_user_ticker_sic_cache", lambda: user_cache)
+
+    result = related_tickers_sharing_sic("MSFT")  # no index -> default cache
+
+    assert result == ["NEW"]
+    assert json.loads(user_cache.read_text()) == {"NEW": "7372"}  # persisted
+    in_memory = tk._ticker_sic_index
+    assert in_memory is not None and in_memory["NEW"] == "7372"  # index updated
+
+
+@patch(_DETAIL_PATCH)
+@patch(_CLIENT_PATCH)
+def test_injected_index_does_not_persist(
+    mock_get_client: MagicMock,
+    mock_detail: MagicMock,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = mock_get_client.return_value
+    client.get_related_companies.return_value = [MagicMock(ticker="NEW")]
+    mock_detail.side_effect = lambda _client, symbol: _detail(symbol, 7372)
+    user_cache = tmp_path / "ticker_sic_codes.json"
+    monkeypatch.setattr(tk, "_user_ticker_sic_cache", lambda: user_cache)
+    # A caller-supplied index is the caller's responsibility -- no cache write.
+    assert related_tickers_sharing_sic("MSFT", index={"MSFT": "7372"}) == ["NEW"]
+    assert not user_cache.exists()
