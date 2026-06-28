@@ -76,6 +76,7 @@ _SPECIFICATION_COLUMN = "Specification"
 _RESIDUAL_COLUMN = "Residual"
 _ZSCORE_COLUMN = "ZScore"
 _PVALUE_COLUMN = "PValue"
+_OOS_DATE_COLUMN = "Date"
 
 
 class FamaFrenchSpecification(BaseModel):
@@ -271,64 +272,80 @@ def _fit(
 
 def get_residuals(
     config: AnalysisConfig,
-    date: str,
+    dates: str | Sequence[str],
     specifications: Sequence[FamaFrenchSpecification],
     *,
     variables: Mapping[str, pl.DataFrame] | None = None,
 ) -> pl.DataFrame:
-    """Out-of-sample Fama-French residuals on one date, per specification.
+    """Out-of-sample Fama-French residuals across one or more dates.
 
-    For each :class:`FamaFrenchSpecification`, fits every ticker's model on
-    that spec's window and evaluates, on the later ``date``, the part of the
-    realized excess return the model leaves unexplained::
+    For each :class:`FamaFrenchSpecification` and each date in *dates*, fits
+    every ticker's model on that spec's estimation window and evaluates the
+    part of the realized excess return the model leaves unexplained::
 
         residual_i = (R_i - R_f) - (alpha_i + sum_k beta_{i,k} * factor_k)
 
-    ``date`` must be strictly after *every* spec's ``end_date`` -- each spec
-    enforces this itself via
-    :meth:`FamaFrenchSpecification.verify_out_of_sample` -- and a trading day
-    for which factor data exists (Ken French lags ~1-2 months). The
-    factor/return data is fetched once and shared across all specifications.
+    Every date must be strictly after *every* spec's ``end_date`` -- each spec
+    enforces this via :meth:`FamaFrenchSpecification.verify_out_of_sample` --
+    and a trading day for which factor data exists (Ken French lags ~1-2
+    months).  Dates with no observations for any ticker are skipped with a
+    warning; a :exc:`ValueError` is raised only when *no* date yields records.
 
     Pass pre-built *variables* (from :func:`get_variables`) to skip the
     network fetch; *config* is only used when *variables* is ``None``.
 
     Returns:
-        A long ``[Ticker, Specification, Residual, ZScore, PValue]`` frame --
-        one row per (ticker, specification) that has both a fitted model and
-        an observation on ``date`` (``Specification`` is the spec's
-        ``name``). ``ZScore`` standardizes the residual by the spec's own
-        fitted idiosyncratic volatility and ``PValue`` is its two-sided tail
-        probability, so both are **local to each specification** -- they are
-        computed under that model's null and are not comparable across
-        specifications.
+        A long
+        ``[Date, Ticker, Specification, Residual, ZScore, PValue]`` frame --
+        one row per (date, ticker, specification) that has both a fitted model
+        and an observation on that date.  ``ZScore`` standardizes the residual
+        by the spec's own fitted idiosyncratic volatility and ``PValue`` is its
+        two-sided tail probability; both are **local to each specification**
+        and must not be compared across specifications.
 
     Raises:
-        ValueError: If ``date`` is not after some spec's window, or no
-            (ticker, specification) pair has an observation on ``date``.
+        ValueError: If any date is not after some spec's window, or no
+            (date, ticker, specification) triple has an observation.
     """
-    target = dt.date.fromisoformat(date[:10])
+    date_list: list[str] = [dates] if isinstance(dates, str) else list(dates)
+    targets = [dt.date.fromisoformat(d[:10]) for d in date_list]
     for specification in specifications:
-        specification.verify_out_of_sample(target)
+        for target in targets:
+            specification.verify_out_of_sample(target)
     if variables is None:
         variables = get_variables(config)
-    records = [
-        record
-        for specification in specifications
-        for record in _residual_records(variables, target, specification)
-    ]
-    if not records:
-        raise ValueError(f"No ticker had an observation on {target}.")
-    return pl.DataFrame(
-        records,
-        schema={
-            _TICKER_COLUMN: pl.Utf8,
-            _SPECIFICATION_COLUMN: pl.Utf8,
-            _RESIDUAL_COLUMN: pl.Float64,
-            _ZSCORE_COLUMN: pl.Float64,
-            _PVALUE_COLUMN: pl.Float64,
-        },
-        orient="row",
+    frames: list[pl.DataFrame] = []
+    for date_str, target in zip(date_list, targets):
+        records = [
+            record
+            for specification in specifications
+            for record in _residual_records(variables, target, specification)
+        ]
+        if not records:
+            logger.warning("No ticker had an observation on %s; skipping.", target)
+            continue
+        frames.append(
+            pl.DataFrame(
+                records,
+                schema={
+                    _TICKER_COLUMN: pl.Utf8,
+                    _SPECIFICATION_COLUMN: pl.Utf8,
+                    _RESIDUAL_COLUMN: pl.Float64,
+                    _ZSCORE_COLUMN: pl.Float64,
+                    _PVALUE_COLUMN: pl.Float64,
+                },
+                orient="row",
+            ).with_columns(pl.lit(date_str).alias(_OOS_DATE_COLUMN))
+        )
+    if not frames:
+        raise ValueError(f"No ticker had any observation across dates {date_list}.")
+    return pl.concat(frames).select(
+        _OOS_DATE_COLUMN,
+        _TICKER_COLUMN,
+        _SPECIFICATION_COLUMN,
+        _RESIDUAL_COLUMN,
+        _ZSCORE_COLUMN,
+        _PVALUE_COLUMN,
     )
 
 

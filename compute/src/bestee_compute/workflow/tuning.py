@@ -359,7 +359,7 @@ class FamaFrenchTuning:
     mean_adjusted_r_squared: float
     oos_residuals: pl.DataFrame
 
-    def summary(self) -> pl.DataFrame:
+    def summarize_results(self) -> pl.DataFrame:
         """Headline per-(specification, ticker) statistics as a flat frame.
 
         Flattens the nested ``results`` mapping into one row per fitted
@@ -471,14 +471,8 @@ def optimize_fama_french(
     if best_factors is None:
         raise ValueError("No Fama-French model could be fit on any interval.")
 
-    oos_frames = [
-        fama.get_residuals(
-            config, oos_date, best_specs, variables=variables
-        ).with_columns(pl.lit(oos_date).alias("Date"))
-        for oos_date in request.oos_dates
-    ]
-    oos_residuals = pl.concat(oos_frames).select(
-        "Date", "Ticker", "Specification", "Residual", "ZScore", "PValue"
+    oos_residuals = fama.get_residuals(
+        config, request.oos_dates, best_specs, variables=variables
     )
 
     logger.info(
