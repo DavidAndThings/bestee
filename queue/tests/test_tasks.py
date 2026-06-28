@@ -39,3 +39,49 @@ def test_invalid_request_is_rejected_before_any_work(task: Any) -> None:
     # model raises before the optimizer (and any network call) runs.
     with pytest.raises(ValidationError):
         task({})
+
+
+def test_completion_email_noop_without_recipient(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sent: list[Any] = []
+    monkeypatch.setattr(tasks.resend.Emails, "send", sent.append)
+    tasks.send_completion_email("task-1", "clustering_abc", None)
+    assert sent == []
+
+
+def test_completion_email_noop_without_api_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("RESEND_API_KEY", raising=False)
+    sent: list[Any] = []
+    monkeypatch.setattr(tasks.resend.Emails, "send", sent.append)
+    tasks.send_completion_email("task-1", "clustering_abc", "user@example.com")
+    assert sent == []
+
+
+def test_completion_email_includes_task_and_result_ids(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("RESEND_API_KEY", "re_test_key")
+    sent: list[dict[str, Any]] = []
+    monkeypatch.setattr(tasks.resend.Emails, "send", sent.append)
+    tasks.send_completion_email("task-abc", "clustering_xyz", "user@example.com")
+    assert len(sent) == 1
+    payload = sent[0]
+    assert payload["to"] == "user@example.com"
+    assert "task-abc" in payload["html"]
+    assert "clustering_xyz" in payload["html"]
+
+
+def test_completion_email_swallows_send_errors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("RESEND_API_KEY", "re_test_key")
+
+    def _boom(_payload: Any) -> None:
+        raise RuntimeError("mailer down")
+
+    monkeypatch.setattr(tasks.resend.Emails, "send", _boom)
+    # Must not raise -- a flaky mailer should never fail the task.
+    tasks.send_completion_email("task-1", "rrg_abc", "user@example.com")
