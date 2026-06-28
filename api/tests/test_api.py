@@ -15,6 +15,10 @@ import pytest
 from fastapi.testclient import TestClient
 
 import main
+from auth import require_auth
+
+# Bypass Clerk authentication in all tests.
+main.app.dependency_overrides[require_auth] = lambda: {"sub": "test_user"}
 
 client = TestClient(main.app)
 

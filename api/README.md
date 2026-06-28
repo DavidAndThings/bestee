@@ -24,8 +24,11 @@ Poll `GET /jobs/{task_id}` until `state` is `SUCCESS` (carries `result`) or
 
 ## Environment
 
-Reads `DO_REDIS_CONNECTION` (the Celery broker/backend URL) from the environment
-or a local `.env` file. The same Redis instance must back the `queue` worker.
+| Variable | Required | Description |
+|---|---|---|
+| `DO_REDIS_CONNECTION` | Yes | Redis URL shared with the `queue` worker (broker + result backend). |
+| `CLERK_JWKS_URL` | Yes | Clerk JWKS endpoint used to verify session tokens. Find it in the Clerk dashboard under **API Keys → Advanced → JWKS URL** (format: `https://<instance>.clerk.accounts.dev/.well-known/jwks.json`). |
+| `RESULTS_DIR` | No | Directory where tuning results are persisted (default `./results`). Must be the same path the `queue` worker writes to. |
 
 ## Run
 

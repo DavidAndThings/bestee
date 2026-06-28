@@ -6,21 +6,24 @@ result. The app is a thin producer -- it dispatches tasks by name and never
 imports the analytics stack.
 """
 
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request
 from fastapi.responses import JSONResponse
 from kombu.exceptions import OperationalError
 from redis.exceptions import RedisError
 
+from auth import require_auth
 from routers import clustering, fama_french, jobs, regime, results, rrg
 
 app = FastAPI(title="bestee tuning API", version="0.1.0")
 
-app.include_router(clustering.router)
-app.include_router(regime.router)
-app.include_router(fama_french.router)
-app.include_router(rrg.router)
-app.include_router(jobs.router)
-app.include_router(results.router)
+_auth = [Depends(require_auth)]
+
+app.include_router(clustering.router, dependencies=_auth)
+app.include_router(regime.router, dependencies=_auth)
+app.include_router(fama_french.router, dependencies=_auth)
+app.include_router(rrg.router, dependencies=_auth)
+app.include_router(jobs.router, dependencies=_auth)
+app.include_router(results.router, dependencies=_auth)
 
 
 @app.get("/health", tags=["health"])
