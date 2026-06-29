@@ -50,6 +50,7 @@ export default function TickerSearchField({
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
+  const [failed, setFailed] = useState(false);
   const [open, setOpen] = useState(false);
   const [highlight, setHighlight] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -78,12 +79,21 @@ export default function TickerSearchField({
         setLoading(false);
         return;
       }
-      void jobsApi.search(trimmed).then((res) => {
-        if (cancelled) return;
-        setResults(res);
-        setHighlight(0);
-        setLoading(false);
-      });
+      void jobsApi
+        .search(trimmed)
+        .then((res) => {
+          if (cancelled) return;
+          setResults(res);
+          setFailed(false);
+          setHighlight(0);
+          setLoading(false);
+        })
+        .catch(() => {
+          if (cancelled) return;
+          setResults([]);
+          setFailed(true);
+          setLoading(false);
+        });
     }, SEARCH_DEBOUNCE_MS);
     return () => {
       cancelled = true;
@@ -196,6 +206,7 @@ export default function TickerSearchField({
             const next = event.target.value;
             setQuery(next);
             setOpen(true);
+            setFailed(false);
             setLoading(next.trim() !== "");
           }}
           onFocus={() => {
@@ -214,6 +225,10 @@ export default function TickerSearchField({
           {loading ? (
             <li className="text-base-content/60 px-3 py-2 text-sm">
               Searching…
+            </li>
+          ) : failed ? (
+            <li className="text-error px-3 py-2 text-sm">
+              Search is unavailable. Check your connection and try again.
             </li>
           ) : visible.length === 0 ? (
             <li className="text-base-content/60 px-3 py-2 text-sm">

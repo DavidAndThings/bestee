@@ -12,7 +12,10 @@ import { getAuthToken } from "./auth";
  * reconciles that index with the authoritative state polled from the API.
  */
 
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? "").replace(/\/+$/, "");
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? "").replace(
+  /\/+$/,
+  "",
+);
 
 /** UI schema id -> API `/tasks/{analysis}` path segment. */
 const ANALYSIS_PATH: Record<string, string> = {
@@ -150,13 +153,29 @@ export async function listJobs(userId: string): Promise<Job[]> {
 export async function search(query: string, limit = 20): Promise<string[]> {
   const trimmed = query.trim();
   if (!trimmed) return [];
+  const url = `${API_BASE_URL}/search?q=${encodeURIComponent(trimmed)}&limit=${limit}`;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15000);
+  let response: Response;
   try {
-    const url = `${API_BASE_URL}/search?q=${encodeURIComponent(trimmed)}&limit=${limit}`;
-    const response = await fetch(url, { headers: await authHeaders() });
-    if (!response.ok) return [];
-    const data = (await response.json()) as { results?: string[] };
-    return Array.isArray(data.results) ? data.results : [];
-  } catch {
-    return [];
+    response = await fetch(url, {
+      headers: await authHeaders(),
+      signal: controller.signal,
+    });
+  } catch (cause) {
+    // Network error, CORS rejection, or timeout. Surface it instead of
+    // silently returning no matches; log the URL to aid debugging.
+    console.error(`[bestee] search request failed: ${url}`, cause);
+    throw new Error("Search request failed", { cause });
+  } finally {
+    clearTimeout(timeout);
   }
+  if (!response.ok) {
+    console.error(
+      `[bestee] search failed: ${response.status} ${response.statusText} (${url})`,
+    );
+    throw new Error(`Search failed (${response.status})`);
+  }
+  const data = (await response.json()) as { results?: string[] };
+  return Array.isArray(data.results) ? data.results : [];
 }
