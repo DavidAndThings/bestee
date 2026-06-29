@@ -276,6 +276,13 @@ const REGIME_DETECTION_SCHEMA: Schema = {
       type: "date",
       description: "End of the analysis window.",
     },
+    benchmark_ticker: {
+      type: "string",
+      ticker: true,
+      description:
+        "Optional benchmark security. When set, each asset is residualized against it with a rolling market-model (OLS) regression; left blank, residualization falls back to PCA over the basket itself.",
+      optional: true,
+    },
   },
   validate: (payload) => {
     const errors: Record<string, string> = {};
