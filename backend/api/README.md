@@ -15,7 +15,8 @@ validate against a single source of truth.
 | `POST` | `/tasks/regime`          | `RegimeRequest`       | Enqueue auto-tuned per-asset regime labels.  |
 | `POST` | `/tasks/fama-french`     | `FamaFrenchRequest`   | Enqueue an auto-tuned Fama-French fit.       |
 | `POST` | `/tasks/rrg`             | `RRGRequest`          | Enqueue an auto-tuned relative-rotation job. |
-| `GET`  | `/jobs/{task_id}`        | --                    | Poll a job's state, result, or error.        |
+| `GET`  | `/jobs`                  | --                    | List the caller's jobs (newest first, paged).|
+| `GET`  | `/jobs/{task_id}`        | --                    | Poll a job's state, inputs, result, or error.|
 | `GET`  | `/results`               | --                    | List stored tuning results, newest first.    |
 | `GET`  | `/results/{result_id}`   | --                    | Load a full stored tuning result.            |
 | `GET`  | `/results/{result_id}/{aspect}` | --             | One analysis-specific aspect, as a table.    |
@@ -23,6 +24,13 @@ validate against a single source of truth.
 | `GET`  | `/sic`                   | --                    | List every SIC code and its industry title.  |
 | `GET`  | `/sic/{sic_code}/tickers`| --                    | Tickers classified under a SIC code.         |
 | `GET`  | `/health`                | --                    | Liveness probe.                              |
+
+Each submission is persisted per user (keyed by the Clerk `sub`) at dispatch
+time, so `GET /jobs` returns the caller's history -- including still-queued jobs
+and their recorded inputs (`analysis`, `payload`, deterministic `result_id`) --
+immediately and across browsers/devices. Live state, timing, and errors are
+merged in from the Celery result backend (which also persists each task's name +
+args via `result_extended`).
 
 A successful `POST` returns `202 Accepted` with a `TaskHandle`
 (`{"task_id": ..., "result_id": ...}`). The `result_id` is deterministic -- a

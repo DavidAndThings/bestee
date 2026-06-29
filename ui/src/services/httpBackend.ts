@@ -13,9 +13,9 @@ import { getAuthToken } from "./auth";
  * it when `VITE_API_BASE_URL` is set. Every request carries the Clerk bearer
  * token (see `auth.ts`).
  *
- * The Celery result backend can't return a job's original schema/payload, so
- * each submission is recorded in a per-user localStorage index; `listJobs`
- * reconciles that index with the authoritative state polled from the API.
+ * Jobs are persisted server-side at submit time (keyed by the Clerk user), so
+ * `listJobs` reads the authoritative, cross-device history straight from
+ * `GET /jobs` -- there is no browser-local index.
  */
 
 // Tolerate stray surrounding quotes/backticks/whitespace from a hand-edited
@@ -34,45 +34,33 @@ const ANALYSIS_PATH: Record<string, string> = {
   "fama-french": "fama-french",
 };
 
-const REMOTE_JOBS_PREFIX = "bestee:remote-jobs:";
-
-type StoredJob = {
-  taskId: string;
-  /** Deterministic result id returned by the API at submit time. */
-  resultId?: string;
-  schemaId: string;
-  payload: Record<string, unknown>;
-  createdAt: number;
+/** API `analysis` value -> UI schema id (the result-id prefix `fama_french`,
+ *  not the `fama-french` route segment). */
+const SCHEMA_FOR_ANALYSIS: Record<string, string> = {
+  rrg: "relative-rotation-graph",
+  clustering: "spectral-clustering",
+  regime: "regime-detection",
+  fama_french: "fama-french",
 };
 
-/** A single job's state as returned by `GET /jobs/{task_id}` (`TaskStatus`). */
-type TaskStatus = {
+/** One job as returned by `GET /jobs` (`TaskStatus`). */
+type ApiJobStatus = {
   task_id: string;
   state: string;
+  result_id?: string | null;
+  analysis?: string | null;
+  payload?: Record<string, unknown> | null;
+  created_at?: string | null;
   finished_at?: string | null;
 };
 
-function indexKey(userId: string): string {
-  return `${REMOTE_JOBS_PREFIX}${userId}`;
-}
-
-function readIndex(userId: string): StoredJob[] {
-  try {
-    const raw = localStorage.getItem(indexKey(userId));
-    const parsed: unknown = raw ? JSON.parse(raw) : [];
-    return Array.isArray(parsed) ? (parsed as StoredJob[]) : [];
-  } catch {
-    return [];
-  }
-}
-
-function writeIndex(userId: string, jobs: StoredJob[]): void {
-  try {
-    localStorage.setItem(indexKey(userId), JSON.stringify(jobs));
-  } catch {
-    // Storage may be unavailable (private mode, quota) — ignore.
-  }
-}
+/** The `GET /jobs` page envelope (`JobsPage`). */
+type ApiJobsPage = {
+  total: number;
+  offset: number;
+  limit: number;
+  items: ApiJobStatus[];
+};
 
 async function authHeaders(): Promise<Record<string, string>> {
   const token = await getAuthToken();
@@ -96,7 +84,7 @@ function toStatus(state: string): JobStatus {
 }
 
 export async function submitJob(
-  userId: string,
+  _userId: string,
   input: SubmitJobInput,
 ): Promise<SubmitJobResult> {
   const analysis = ANALYSIS_PATH[input.schemaId];
@@ -115,60 +103,40 @@ export async function submitJob(
     task_id: string;
     result_id: string;
   };
-  const now = Date.now();
-  const jobs = readIndex(userId);
-  jobs.push({
-    taskId: data.task_id,
-    resultId: data.result_id,
-    schemaId: input.schemaId,
-    payload: input.payload,
-    createdAt: now,
-  });
-  writeIndex(userId, jobs);
+  // The API persists the job per user, so there is no browser-local bookkeeping.
   return {
     ok: true,
     requestId: data.task_id,
     resultId: data.result_id,
-    receivedAt: now,
+    receivedAt: Date.now(),
   };
 }
 
 export async function listJobs(userId: string): Promise<Job[]> {
-  const stored = readIndex(userId)
-    .slice()
-    .sort((a, b) => b.createdAt - a.createdAt);
-  const headers = await authHeaders();
-  return Promise.all(
-    stored.map(async (record): Promise<Job> => {
-      let status: JobStatus = "queued";
-      let updatedAt = record.createdAt;
-      try {
-        const response = await fetch(`${API_BASE_URL}/jobs/${record.taskId}`, {
-          headers,
-        });
-        if (response.ok) {
-          const meta = (await response.json()) as TaskStatus;
-          status = toStatus(meta.state);
-          if (meta.finished_at) {
-            const finished = Date.parse(meta.finished_at);
-            if (!Number.isNaN(finished)) updatedAt = finished;
-          }
-        }
-      } catch {
-        // Network hiccup — leave this job as queued for now.
-      }
-      return {
-        id: record.taskId,
-        userId,
-        schemaId: record.schemaId,
-        status,
-        payload: record.payload,
-        resultId: record.resultId,
-        createdAt: record.createdAt,
-        updatedAt,
-      };
-    }),
-  );
+  const response = await fetch(`${API_BASE_URL}/jobs?limit=100`, {
+    headers: await authHeaders(),
+  });
+  if (!response.ok) {
+    throw new Error(`Failed to load jobs (${response.status})`);
+  }
+  const data = (await response.json()) as ApiJobsPage;
+  return data.items.map((item): Job => {
+    const parsedCreated = item.created_at ? Date.parse(item.created_at) : NaN;
+    const createdAt = Number.isNaN(parsedCreated) ? Date.now() : parsedCreated;
+    const finished = item.finished_at ? Date.parse(item.finished_at) : NaN;
+    return {
+      id: item.task_id,
+      userId,
+      schemaId: item.analysis
+        ? (SCHEMA_FOR_ANALYSIS[item.analysis] ?? item.analysis)
+        : "",
+      status: toStatus(item.state),
+      payload: item.payload ?? {},
+      resultId: item.result_id ?? undefined,
+      createdAt,
+      updatedAt: Number.isNaN(finished) ? createdAt : finished,
+    };
+  });
 }
 
 /** One result aspect as returned by `GET /results/{id}/{aspect}` (`ResultTable`). */

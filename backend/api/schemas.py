@@ -28,6 +28,11 @@ class TaskStatus(BaseModel):
     task_id: str
     state: str
     result_id: str | None = None
+    # Recorded at submit time (from the persisted job record): which analysis,
+    # the request payload (for redo), and when it was submitted.
+    analysis: str | None = None
+    payload: dict[str, Any] | None = None
+    created_at: str | None = None
     error: str | None = None
     started_at: str | None = None
     finished_at: str | None = None

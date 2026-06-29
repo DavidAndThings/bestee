@@ -15,6 +15,13 @@ from dotenv import load_dotenv
 
 _KEY_PREFIX = "celery-task-meta-"
 _START_KEY_PREFIX = "celery-task-started-"
+# Our own per-user job index (submitted jobs are recorded here at dispatch time,
+# so queued jobs are listable immediately and the history survives across
+# browsers / devices -- unlike the Celery meta, which only appears once a worker
+# picks the task up).
+_JOB_PREFIX = "bestee:job:"
+_USER_JOBS_PREFIX = "bestee:user-jobs:"
+_MAX_JOBS_PER_USER = 1000
 
 
 def _build_redis_client() -> redis.Redis:
@@ -52,6 +59,64 @@ def get_task_start_times(task_ids: list[str]) -> dict[str, str]:
     keys = [f"{_START_KEY_PREFIX}{tid}" for tid in task_ids]
     values: list[Any] = cast(list[Any], _redis_client.mget(keys))
     return {tid: raw for tid, raw in zip(task_ids, values) if raw is not None}
+
+
+def record_job(
+    user_id: str,
+    task_id: str,
+    analysis: str,
+    payload: dict[str, Any],
+    result_id: str,
+    created_at: str,
+) -> None:
+    """Persist a submitted job and prepend it to the user's job list.
+
+    The record holds everything the listing needs that the Celery result
+    backend can't reliably give us up front: the analysis, the request payload
+    (for redo), the deterministic result id, and the submit time.
+    """
+    record = json.dumps(
+        {
+            "task_id": task_id,
+            "analysis": analysis,
+            "payload": payload,
+            "result_id": result_id,
+            "created_at": created_at,
+        }
+    )
+    user_key = f"{_USER_JOBS_PREFIX}{user_id}"
+    pipe = _redis_client.pipeline()
+    pipe.set(f"{_JOB_PREFIX}{task_id}", record)
+    pipe.lpush(user_key, task_id)
+    pipe.ltrim(user_key, 0, _MAX_JOBS_PER_USER - 1)
+    pipe.execute()
+
+
+def get_job_record(task_id: str) -> dict[str, Any] | None:
+    """The stored record for *task_id*, or ``None`` if it was never recorded."""
+    raw = cast("str | None", _redis_client.get(f"{_JOB_PREFIX}{task_id}"))
+    return json.loads(raw) if raw is not None else None
+
+
+def list_user_jobs(
+    user_id: str, offset: int, limit: int
+) -> tuple[int, list[dict[str, Any]]]:
+    """A ``(total, records)`` page of the user's jobs, newest first.
+
+    ``records`` are the dicts written by :func:`record_job`; a missing record
+    (e.g. expired) is skipped, so the page may be shorter than *limit*.
+    """
+    user_key = f"{_USER_JOBS_PREFIX}{user_id}"
+    total = int(cast(int, _redis_client.llen(user_key)))
+    task_ids: list[str] = cast(
+        "list[str]", _redis_client.lrange(user_key, offset, offset + limit - 1)
+    )
+    if not task_ids:
+        return total, []
+    keys = [f"{_JOB_PREFIX}{tid}" for tid in task_ids]
+    raws: list[Any] = cast(list[Any], _redis_client.mget(keys))
+    records = [json.loads(raw) for raw in raws if raw is not None]
+    return total, records
 
 
 def get_task_metas(task_ids: list[str]) -> list[dict[str, Any]]:

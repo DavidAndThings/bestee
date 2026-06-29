@@ -55,6 +55,9 @@ def build_celery_app(
         task_serializer="json",
         result_serializer="json",
         accept_content=["json"],
+        # Persist the task name + args (the request payload) in the result
+        # backend so a job's inputs are recoverable after dispatch.
+        result_extended=True,
         **conf,
     )
     return app

@@ -5,7 +5,7 @@ from typing import Annotated
 from bestee_compute.workflow.tuning import RegimeRequest
 from fastapi import APIRouter, Depends
 
-from auth import get_user_email
+from auth import get_user_email, get_user_id
 from schemas import TaskHandle
 from submit import enqueue
 
@@ -16,6 +16,7 @@ router = APIRouter(prefix="/tasks", tags=["regime"])
 def submit_regime(
     request: RegimeRequest,
     email: Annotated[str | None, Depends(get_user_email)],
+    user_id: Annotated[str, Depends(get_user_id)],
 ) -> TaskHandle:
     """Enqueue a regime-detection job and return its task id."""
-    return enqueue("regime", "tuning.optimize_regime", request, email)
+    return enqueue("regime", "tuning.optimize_regime", request, email, user_id)

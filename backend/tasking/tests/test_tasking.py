@@ -38,6 +38,8 @@ def test_build_app_pins_json_serialization(monkeypatch: pytest.MonkeyPatch) -> N
     assert app.conf.task_serializer == "json"
     assert app.conf.result_serializer == "json"
     assert app.conf.accept_content == ["json"]
+    # The task name + args (request payload) are persisted in the result backend.
+    assert app.conf.result_extended is True
 
 
 def test_build_app_applies_extra_conf(monkeypatch: pytest.MonkeyPatch) -> None:

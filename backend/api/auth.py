@@ -81,6 +81,24 @@ def require_auth(
         ) from exc
 
 
+def get_user_id(
+    claims: Annotated[dict[str, Any], Depends(require_auth)],
+) -> str:
+    """The authenticated user's stable Clerk id (the JWT ``sub`` claim).
+
+    Always present on a valid session token, so it is the reliable key for
+    per-user data (e.g. the job history); raises ``HTTP 401`` if absent.
+    """
+    sub = claims.get("sub")
+    if not isinstance(sub, str) or not sub:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Session token has no subject claim.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return sub
+
+
 _EMAIL_CLAIMS = ("email", "email_address", "primary_email_address")
 
 

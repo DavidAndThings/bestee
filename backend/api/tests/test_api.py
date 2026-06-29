@@ -5,7 +5,6 @@ the right task name and payload are dispatched, and polling reads a mocked
 :class:`AsyncResult`.
 """
 
-import json
 import re
 from datetime import UTC, datetime
 from pathlib import Path
@@ -26,10 +25,12 @@ client = TestClient(main.app)
 
 @pytest.fixture(autouse=True)
 def _stub_resolvers():
-    """Resolve ticker terms to themselves so submit tests stay offline.
+    """Keep every test offline.
 
-    The real resolvers hit the Massive API; identity stubs keep the dispatched
-    payload equal to the request body unless a test overrides them.
+    Resolve ticker terms to themselves (the real resolvers hit the Massive API),
+    no-op the Redis-backed job record write on submit, and default the job-record
+    read / start-time lookups so polling never touches the real result backend.
+    Individual tests override these where they assert on the values.
     """
     with (
         patch(
@@ -40,6 +41,9 @@ def _stub_resolvers():
             "resolve.resolve_term_to_ticker",
             side_effect=lambda term, **_: term,
         ),
+        patch("submit.record_job"),
+        patch("routers.jobs.get_job_record", return_value=None),
+        patch("routers.jobs.get_task_start_times", return_value={}),
     ):
         yield
 
@@ -329,67 +333,70 @@ def test_poll_includes_timing_when_start_time_recorded() -> None:
 # ---------------------------------------------------------------------------
 
 
-def _mock_redis(
-    keys: list[str],
-    mget_values: list[Any] | None = None,
-) -> MagicMock:
-    """Build a mock Redis client for list-jobs tests."""
-    mock = MagicMock()
-    mock.scan_iter.return_value = keys
-    if mget_values is not None:
-        mock.mget.return_value = mget_values
-    return mock
+def _record(task_id: str, analysis: str = "clustering") -> dict[str, Any]:
+    """A stored job record like :func:`redis_client.record_job` writes."""
+    return {
+        "task_id": task_id,
+        "analysis": analysis,
+        "payload": {"tickers": ["AAA"]},
+        "result_id": f"{analysis}_{task_id}",
+        "created_at": "2024-01-01T00:00:00+00:00",
+    }
 
 
 def test_list_jobs_empty() -> None:
-    with (
-        patch("redis_client._redis_client", _mock_redis([])),
-        patch("routers.jobs.get_task_start_times", return_value={}),
-    ):
+    with patch("routers.jobs.list_user_jobs", return_value=(0, [])):
         response = client.get("/jobs")
     assert response.status_code == 200
     data = response.json()
     assert data["total"] == 0
     assert data["items"] == []
     assert data["offset"] == 0
-    assert data["limit"] == 20
+    assert data["limit"] == 50
 
 
-def test_list_jobs_returns_all_statuses() -> None:
-    keys = ["celery-task-meta-aaa", "celery-task-meta-bbb"]
-    mget_vals = [
-        json.dumps({"task_id": "aaa", "status": "SUCCESS", "result": {"x": 1}}),
-        json.dumps({"task_id": "bbb", "status": "PENDING"}),
+def test_list_jobs_returns_recorded_jobs() -> None:
+    records = [_record("aaa"), _record("bbb", analysis="regime")]
+    metas = [
+        {
+            "task_id": "aaa",
+            "status": "SUCCESS",
+            "result": {"result_id": "clustering_aaa"},
+        },
+        {"task_id": "bbb", "status": "PENDING"},
     ]
     with (
-        patch("redis_client._redis_client", _mock_redis(keys, mget_vals)),
-        patch("routers.jobs.get_task_start_times", return_value={}),
+        patch("routers.jobs.list_user_jobs", return_value=(2, records)),
+        patch("routers.jobs.get_task_metas", return_value=metas),
     ):
         response = client.get("/jobs")
     assert response.status_code == 200
     data = response.json()
     assert data["total"] == 2
     assert len(data["items"]) == 2
-    # keys are sorted, so aaa comes first
+    # Order is the per-user list order (newest first), not a re-sort.
     assert data["items"][0]["task_id"] == "aaa"
     assert data["items"][0]["state"] == "SUCCESS"
+    assert data["items"][0]["analysis"] == "clustering"
+    assert data["items"][0]["payload"] == {"tickers": ["AAA"]}
+    assert data["items"][0]["result_id"] == "clustering_aaa"
     assert data["items"][1]["state"] == "PENDING"
+    # A queued job still surfaces its recorded inputs + deterministic result id.
+    assert data["items"][1]["result_id"] == "regime_bbb"
 
 
 def test_list_jobs_failure_entry_formats_error() -> None:
-    keys = ["celery-task-meta-xyz"]
-    mget_vals = [
-        json.dumps(
-            {
-                "task_id": "xyz",
-                "status": "FAILURE",
-                "result": {"exc_type": "ValueError", "exc_message": ["bad input"]},
-            }
-        )
+    records = [_record("xyz", analysis="rrg")]
+    metas = [
+        {
+            "task_id": "xyz",
+            "status": "FAILURE",
+            "result": {"exc_type": "ValueError", "exc_message": ["bad input"]},
+        }
     ]
     with (
-        patch("redis_client._redis_client", _mock_redis(keys, mget_vals)),
-        patch("routers.jobs.get_task_start_times", return_value={}),
+        patch("routers.jobs.list_user_jobs", return_value=(1, records)),
+        patch("routers.jobs.get_task_metas", return_value=metas),
     ):
         response = client.get("/jobs")
     item = response.json()["items"][0]
@@ -399,25 +406,21 @@ def test_list_jobs_failure_entry_formats_error() -> None:
 
 
 def test_list_jobs_pagination() -> None:
-    # 5 tasks; request page starting at offset=2, size=2
-    keys = [f"celery-task-meta-task-{i}" for i in range(5)]
-    # sorted task ids: task-0 .. task-4; offset=2,limit=2 → task-2, task-3
-    mget_vals = [
-        json.dumps({"task_id": f"task-{i}", "status": "SUCCESS", "result": {}})
-        for i in range(2, 4)
+    records = [_record("task-2"), _record("task-3")]
+    metas = [
+        {"task_id": "task-2", "status": "SUCCESS", "result": {}},
+        {"task_id": "task-3", "status": "SUCCESS", "result": {}},
     ]
     with (
-        patch("redis_client._redis_client", _mock_redis(keys, mget_vals)),
-        patch("routers.jobs.get_task_start_times", return_value={}),
+        patch("routers.jobs.list_user_jobs", return_value=(5, records)),
+        patch("routers.jobs.get_task_metas", return_value=metas),
     ):
         response = client.get("/jobs?offset=2&limit=2")
     data = response.json()
     assert data["total"] == 5
     assert data["offset"] == 2
     assert data["limit"] == 2
-    assert len(data["items"]) == 2
-    assert data["items"][0]["task_id"] == "task-2"
-    assert data["items"][1]["task_id"] == "task-3"
+    assert [i["task_id"] for i in data["items"]] == ["task-2", "task-3"]
 
 
 def test_list_jobs_rejects_invalid_limit() -> None:
@@ -431,20 +434,19 @@ def test_list_jobs_rejects_limit_above_max() -> None:
 
 
 def test_list_jobs_includes_timing_when_start_time_recorded() -> None:
-    keys = ["celery-task-meta-task-abc"]
-    mget_vals = [
-        json.dumps(
-            {
-                "task_id": "task-abc",
-                "status": "SUCCESS",
-                "result": {},
-                "date_done": "2024-01-01T12:00:05+00:00",
-            }
-        )
+    records = [_record("task-abc")]
+    metas = [
+        {
+            "task_id": "task-abc",
+            "status": "SUCCESS",
+            "result": {},
+            "date_done": "2024-01-01T12:00:05+00:00",
+        }
     ]
     start_times = {"task-abc": "2024-01-01T12:00:00+00:00"}
     with (
-        patch("redis_client._redis_client", _mock_redis(keys, mget_vals)),
+        patch("routers.jobs.list_user_jobs", return_value=(1, records)),
+        patch("routers.jobs.get_task_metas", return_value=metas),
         patch("routers.jobs.get_task_start_times", return_value=start_times),
     ):
         response = client.get("/jobs")
