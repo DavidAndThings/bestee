@@ -1,0 +1,24 @@
+{
+  "extraPaths": ["compute/src", "chat/src"],
+  "executionEnvironments": [
+    {
+      "root": "api",
+      "extraPaths": ["compute/src", "api/.venv/lib/python3.14/site-packages"],
+    },
+    {
+      "root": "queue",
+      "extraPaths": ["compute/src", "queue/.venv/lib/python3.14/site-packages"],
+    },
+    {
+      "root": "chat",
+      "extraPaths": ["chat/src", "chat/.venv/lib/python3.14/site-packages"],
+    },
+    {
+      "root": "compute",
+      "extraPaths": [
+        "compute/src",
+        "compute/.venv/lib/python3.14/site-packages",
+      ],
+    },
+  ],
+}
