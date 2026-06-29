@@ -35,7 +35,7 @@ Poll `GET /jobs/{task_id}` until `state` is `SUCCESS` (carries `result`) or
 | `LOG_FORMAT` | No | `json` (default, one object per line) or `text`. |
 
 Logs are written to both stdout (captured by `systemd`/`journald`) and
-`${LOG_DIR}/api.log`. See [`deploy/`](../deploy/README.md) for droplet
+`${LOG_DIR}/api.log`. See [`deploy/`](../../deploy/README.md) for droplet
 `systemd` + `logrotate` templates.
 
 ## Run

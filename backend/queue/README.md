@@ -38,7 +38,7 @@ successes and failures alike.
 | `LOG_FORMAT` | `json` | `json` (one object per line) or `text`. |
 
 In-process rotation is disabled; rotation is delegated to the system
-`logrotate`. See [`deploy/`](../deploy/README.md) for droplet `systemd` +
+`logrotate`. See [`deploy/`](../../deploy/README.md) for droplet `systemd` +
 `logrotate` templates.
 
 ## Running
