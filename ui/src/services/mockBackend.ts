@@ -150,3 +150,105 @@ export function submitJob(
   });
   return delay({ ok: true, requestId, receivedAt: now }, 900);
 }
+
+/**
+ * A representative slice of the backend `/search` catalog: company names mixed
+ * with SIC industry titles (which the SEC publishes upper-cased). Lets the
+ * ticker autocomplete behave realistically against the mock. The real backend
+ * resolves a chosen term to ticker symbols at submission time.
+ */
+const SEARCH_CATALOG: string[] = [
+  // Company names (as the Massive ticker universe reports them).
+  "Apple Inc.",
+  "Microsoft Corporation",
+  "NVIDIA Corporation",
+  "Alphabet Inc. Class A",
+  "Alphabet Inc. Class C",
+  "Amazon.com, Inc.",
+  "Meta Platforms, Inc.",
+  "Tesla, Inc.",
+  "Broadcom Inc.",
+  "Berkshire Hathaway Inc.",
+  "JPMorgan Chase & Co.",
+  "Visa Inc.",
+  "Mastercard Incorporated",
+  "Eli Lilly and Company",
+  "UnitedHealth Group Incorporated",
+  "Exxon Mobil Corporation",
+  "Johnson & Johnson",
+  "Procter & Gamble Company",
+  "Home Depot, Inc.",
+  "Bank of America Corporation",
+  "AbbVie Inc.",
+  "Coca-Cola Company",
+  "PepsiCo, Inc.",
+  "Costco Wholesale Corporation",
+  "Adobe Inc.",
+  "Salesforce, Inc.",
+  "Advanced Micro Devices, Inc.",
+  "Netflix, Inc.",
+  "Intel Corporation",
+  "Cisco Systems, Inc.",
+  "Walmart Inc.",
+  "Walt Disney Company",
+  "McDonald's Corporation",
+  "Nike, Inc.",
+  "Oracle Corporation",
+  "QUALCOMM Incorporated",
+  "Texas Instruments Incorporated",
+  "Pfizer Inc.",
+  "Chevron Corporation",
+  "Wells Fargo & Company",
+  "Goldman Sachs Group, Inc.",
+  "Morgan Stanley",
+  "International Business Machines Corporation",
+  "American Express Company",
+  "Boeing Company",
+  "Caterpillar Inc.",
+  "Starbucks Corporation",
+  "Micron Technology, Inc.",
+  "Palantir Technologies Inc.",
+  "Uber Technologies, Inc.",
+  // SIC industry titles (upper-case, as the SEC publishes them).
+  "SERVICES-PREPACKAGED SOFTWARE",
+  "SEMICONDUCTORS & RELATED DEVICES",
+  "ELECTRONIC COMPUTERS",
+  "NATIONAL COMMERCIAL BANKS",
+  "STATE COMMERCIAL BANKS",
+  "PHARMACEUTICAL PREPARATIONS",
+  "BIOLOGICAL PRODUCTS (NO DIAGNOSTIC SUBSTANCES)",
+  "CRUDE PETROLEUM & NATURAL GAS",
+  "RETAIL-VARIETY STORES",
+  "RETAIL-EATING PLACES",
+  "MOTOR VEHICLES & PASSENGER CAR BODIES",
+  "AIRCRAFT",
+  "SERVICES-COMPUTER PROGRAMMING, DATA PROCESSING, ETC.",
+  "TELEPHONE & TELEGRAPH APPARATUS",
+  "BEVERAGES",
+  "REAL ESTATE INVESTMENT TRUSTS",
+  "SERVICES-COMPUTER INTEGRATED SYSTEMS DESIGN",
+  "RETAIL-CATALOG & MAIL-ORDER HOUSES",
+  "SERVICES-BUSINESS SERVICES, NEC",
+];
+
+/**
+ * Search the catalog for *query* (case-insensitive substring), ranking prefix
+ * matches ahead of other matches -- mirroring the backend `/search` endpoint.
+ * Swap this for an authenticated HTTP call when wiring up the live API.
+ */
+export function search(query: string, limit = 20): Promise<string[]> {
+  const needle = query.trim().toLowerCase();
+  if (!needle) return delay<string[]>([], 120);
+  const prefix: string[] = [];
+  const other: string[] = [];
+  const seen = new Set<string>();
+  for (const term of SEARCH_CATALOG) {
+    const folded = term.toLowerCase();
+    if (!folded.includes(needle) || seen.has(folded)) continue;
+    seen.add(folded);
+    (folded.startsWith(needle) ? prefix : other).push(term);
+  }
+  prefix.sort();
+  other.sort();
+  return delay([...prefix, ...other].slice(0, limit), 120);
+}

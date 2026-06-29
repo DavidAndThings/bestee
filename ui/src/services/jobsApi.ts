@@ -17,4 +17,8 @@ export const jobsApi = {
   ): Promise<mockBackend.SubmitJobResult> {
     return mockBackend.submitJob(userId, input);
   },
+  /** Search the term catalog (company names + SIC industry titles). */
+  search(query: string, limit?: number): Promise<string[]> {
+    return mockBackend.search(query, limit);
+  },
 };
