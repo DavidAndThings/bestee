@@ -89,6 +89,15 @@ def test_health() -> None:
     assert response.json() == {"status": "ok"}
 
 
+def test_cors_allows_configured_origin() -> None:
+    """An allow-listed browser origin is echoed back in the CORS header."""
+    response = client.get("/health", headers={"Origin": "http://localhost:5173"})
+    assert response.status_code == 200
+    assert (
+        response.headers.get("access-control-allow-origin") == "http://localhost:5173"
+    )
+
+
 @pytest.mark.parametrize(("path", "task_name", "body"), SUBMIT_CASES)
 def test_submit_enqueues_task(path: str, task_name: str, body: dict) -> None:
     sent = MagicMock()

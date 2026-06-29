@@ -6,17 +6,32 @@ result. The app is a thin producer -- it dispatches tasks by name and never
 imports the analytics stack.
 """
 
+import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from bestee_compute.logging_config import configure_logging
+from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from kombu.exceptions import OperationalError
 from redis.exceptions import RedisError
 
 from auth import require_auth
 from routers import clustering, fama_french, jobs, regime, results, rrg, ticker
+
+load_dotenv()
+
+# Browser origins allowed to call the API. Comma-separated in CORS_ALLOW_ORIGINS;
+# defaults to the local Vite dev server. For a split-origin production deploy set
+# it to the UI's domain (a same-origin deploy behind one proxy needs no CORS).
+_DEFAULT_CORS_ORIGINS = "http://localhost:5173,http://127.0.0.1:5173"
+_CORS_ALLOW_ORIGINS = [
+    origin.strip()
+    for origin in os.environ.get("CORS_ALLOW_ORIGINS", _DEFAULT_CORS_ORIGINS).split(",")
+    if origin.strip()
+]
 
 
 @asynccontextmanager
@@ -27,6 +42,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(title="bestee tuning API", version="0.1.0", lifespan=lifespan)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_CORS_ALLOW_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 _auth = [Depends(require_auth)]
 
