@@ -268,3 +268,17 @@ def test_resolve_unknown_term_is_dropped() -> None:
 def test_resolve_term_to_single_ticker() -> None:
     assert tk.resolve_term_to_ticker("Apple Inc.", catalog=_CATALOG) == "AAPL"
     assert tk.resolve_term_to_ticker("nope", catalog=_CATALOG) is None
+
+
+# ── get_ticker_name_map ──────────────────────────────────────
+
+
+def test_get_ticker_name_map_skips_blank_symbols() -> None:
+    tk.get_ticker_name_map.cache_clear()
+    df = pl.DataFrame(
+        {"Ticker": ["AAPL", "MSFT", ""], "Name": ["Apple Inc.", "Microsoft Corp", "X"]}
+    )
+    with patch("bestee_compute.stocks.tickers.get_all_tickers_df", return_value=df):
+        result = tk.get_ticker_name_map()
+    tk.get_ticker_name_map.cache_clear()
+    assert result == {"AAPL": "Apple Inc.", "MSFT": "Microsoft Corp"}

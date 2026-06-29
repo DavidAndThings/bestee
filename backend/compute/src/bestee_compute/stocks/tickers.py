@@ -648,6 +648,20 @@ def _ticker_name_catalog() -> _Catalog:
     return ticker_set, {name: tuple(t) for name, t in name_to_tickers.items()}
 
 
+@cache
+def get_ticker_name_map() -> dict[str, str]:
+    """Map every ticker symbol to its company name.
+
+    Built from the full ticker universe and cached after the first
+    (network-bound) call; clear with ``get_ticker_name_map.cache_clear()``.
+    Tickers without a name are omitted.
+    """
+    df = get_all_tickers_df()
+    symbols = df.get_column(cols.TICKER).to_list()
+    names = df.get_column(cols.NAME).to_list()
+    return {symbol: name for symbol, name in zip(symbols, names) if symbol and name}
+
+
 def _resolve_one(
     term: str,
     ticker_set: frozenset[str],

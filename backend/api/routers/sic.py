@@ -6,10 +6,10 @@
 """
 
 from bestee_compute.stocks.sic import get_sic_codes_df
-from bestee_compute.stocks.tickers import get_tickers_by_sic_code
+from bestee_compute.stocks.tickers import get_ticker_name_map, get_tickers_by_sic_code
 from fastapi import APIRouter
 
-from schemas import SicCode, SicCodeList, SicTickers
+from schemas import SicCode, SicCodeList, SicTicker, SicTickers
 
 router = APIRouter(prefix="/sic", tags=["sic"])
 
@@ -27,6 +27,10 @@ def list_sic_codes() -> SicCodeList:
 
 @router.get("/{sic_code}/tickers", response_model=SicTickers)
 def tickers_for_sic(sic_code: str) -> SicTickers:
-    """The ticker symbols classified under *sic_code*."""
-    tickers = get_tickers_by_sic_code(sic_code)
-    return SicTickers(sic_code=sic_code, count=len(tickers), tickers=tickers)
+    """The tickers classified under *sic_code*, each with its company name."""
+    names = get_ticker_name_map()
+    items = [
+        SicTicker(ticker=ticker, name=names.get(ticker))
+        for ticker in get_tickers_by_sic_code(sic_code)
+    ]
+    return SicTickers(sic_code=sic_code, count=len(items), tickers=items)

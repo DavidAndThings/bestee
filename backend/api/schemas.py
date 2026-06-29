@@ -65,9 +65,16 @@ class SicCodeList(BaseModel):
     codes: list[SicCode]
 
 
+class SicTicker(BaseModel):
+    """A ticker symbol and its company name."""
+
+    ticker: str
+    name: str | None = None
+
+
 class SicTickers(BaseModel):
-    """The ticker symbols classified under a SIC code."""
+    """The tickers classified under a SIC code, with company names."""
 
     sic_code: str
     count: int
-    tickers: list[str]
+    tickers: list[SicTicker]

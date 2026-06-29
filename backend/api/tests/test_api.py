@@ -525,13 +525,20 @@ def test_list_sic_codes() -> None:
 
 
 def test_tickers_for_sic_code() -> None:
-    with patch("routers.sic.get_tickers_by_sic_code", return_value=["AAA", "BBB"]):
+    with (
+        patch("routers.sic.get_tickers_by_sic_code", return_value=["AAA", "BBB"]),
+        patch("routers.sic.get_ticker_name_map", return_value={"AAA": "Alpha Inc."}),
+    ):
         response = client.get("/sic/7372/tickers")
     assert response.status_code == 200
     data = response.json()
     assert data["sic_code"] == "7372"
     assert data["count"] == 2
-    assert data["tickers"] == ["AAA", "BBB"]
+    # Names are looked up per ticker; an unknown ticker gets a null name.
+    assert data["tickers"] == [
+        {"ticker": "AAA", "name": "Alpha Inc."},
+        {"ticker": "BBB", "name": None},
+    ]
 
 
 def test_get_result_returns_404_for_missing_result() -> None:
