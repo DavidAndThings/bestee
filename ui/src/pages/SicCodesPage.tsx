@@ -12,9 +12,9 @@ type TickersState =
   | { status: "error" }
   | { status: "ready"; tickers: SicTicker[] };
 
-// SEC publishes ~1,000 SIC codes; cap the rendered rows and nudge the user to
-// filter rather than paint the whole list at once.
-const MAX_ROWS = 200;
+// SEC publishes ~1,000 SIC codes; page through them rather than painting the
+// whole (filtered) list at once.
+const PAGE_SIZE = 25;
 
 /**
  * Browse the SEC SIC industry codes. Filter by code or title, and click a row
@@ -23,6 +23,7 @@ const MAX_ROWS = 200;
 export default function SicCodesPage() {
   const [list, setList] = useState<ListState>({ status: "loading" });
   const [filter, setFilter] = useState("");
+  const [page, setPage] = useState(0);
   const [selected, setSelected] = useState<SicCode | null>(null);
   const [tickers, setTickers] = useState<TickersState>({ status: "loading" });
 
@@ -71,7 +72,10 @@ export default function SicCodesPage() {
     );
   }, [list, filter]);
 
-  const visible = filtered.slice(0, MAX_ROWS);
+  const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const safePage = Math.min(page, pageCount - 1);
+  const start = safePage * PAGE_SIZE;
+  const pageItems = filtered.slice(start, start + PAGE_SIZE);
 
   const openTickers = (code: SicCode) => {
     setSelected(code);
@@ -97,7 +101,10 @@ export default function SicCodesPage() {
           className="input input-bordered mb-4 w-full"
           placeholder="Filter by code or industry…"
           value={filter}
-          onChange={(event) => setFilter(event.target.value)}
+          onChange={(event) => {
+            setFilter(event.target.value);
+            setPage(0);
+          }}
         />
 
         {list.status === "loading" ? (
@@ -124,7 +131,7 @@ export default function SicCodesPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {visible.map((code) => (
+                  {pageItems.map((code) => (
                     <tr
                       key={code.sicCode}
                       className="hover cursor-pointer"
@@ -149,12 +156,30 @@ export default function SicCodesPage() {
                 </tbody>
               </table>
             </div>
-            <p className="text-base-content/50 mt-3 text-sm">
-              Showing {visible.length} of {filtered.length}
-              {filtered.length > MAX_ROWS &&
-                " — refine your filter to narrow it"}
-              .
-            </p>
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+              <span className="text-base-content/50 text-sm">
+                Showing {start + 1}–{start + pageItems.length} of{" "}
+                {filtered.length} · Page {safePage + 1} of {pageCount}
+              </span>
+              <div className="join">
+                <button
+                  type="button"
+                  className="join-item btn btn-sm"
+                  disabled={safePage === 0}
+                  onClick={() => setPage(safePage - 1)}
+                >
+                  « Prev
+                </button>
+                <button
+                  type="button"
+                  className="join-item btn btn-sm"
+                  disabled={safePage >= pageCount - 1}
+                  onClick={() => setPage(safePage + 1)}
+                >
+                  Next »
+                </button>
+              </div>
+            </div>
           </>
         )}
       </div>
