@@ -11,6 +11,20 @@ from dotenv import load_dotenv
 import audit  # noqa: E402, F401  (side-effect import; must follow celery import)
 
 
+def _with_ssl_cert_reqs(url: str | None) -> str | None:
+    """Ensure a TLS Redis URL (``rediss://``) carries an ``ssl_cert_reqs`` param.
+
+    Celery's Redis result backend rejects a ``rediss://`` URL that omits
+    ``ssl_cert_reqs``.  Managed Redis (e.g. DigitalOcean) uses ``rediss://``;
+    default to ``CERT_NONE`` (encrypted, no certificate verification -- matching
+    kombu's broker fallback) unless the URL already sets it.
+    """
+    if url and url.startswith("rediss://") and "ssl_cert_reqs" not in url:
+        separator = "&" if "?" in url else "?"
+        return f"{url}{separator}ssl_cert_reqs=CERT_NONE"
+    return url
+
+
 def get_celery_app() -> Celery:
     """Build and configure the Celery application.
 
@@ -20,7 +34,7 @@ def get_celery_app() -> Celery:
     and the worker is tuned for the long-running tuning jobs in :mod:`tasks`.
     """
     load_dotenv()
-    redis_connection = os.environ.get("DO_REDIS_CONNECTION")
+    redis_connection = _with_ssl_cert_reqs(os.environ.get("DO_REDIS_CONNECTION"))
     app = Celery(
         "queue",
         broker=redis_connection,
