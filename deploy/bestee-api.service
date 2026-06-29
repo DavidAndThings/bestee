@@ -4,7 +4,7 @@
 # Logs: journalctl -u bestee-api -f   (stdout)  and  /var/log/bestee/api.log
 #
 # Adjust User, paths, host/port, and worker count. Front with nginx/Caddy for
-# TLS. Secrets are read from the repo-root .env by the app (python-dotenv);
+# TLS. Secrets are read from backend/.env by the app (python-dotenv);
 # only LOG_DIR is set here so files land in /var/log/bestee.
 
 [Unit]
@@ -16,11 +16,11 @@ Wants=network-online.target
 Type=simple
 User=bestee
 Group=bestee
-WorkingDirectory=/opt/bestee/api
+WorkingDirectory=/opt/bestee/backend/api
 Environment=LOG_DIR=/var/log/bestee
 Environment=LOG_LEVEL=INFO
 Environment=LOG_FORMAT=json
-ExecStart=/opt/bestee/api/.venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000
+ExecStart=/opt/bestee/backend/.venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000
 Restart=on-failure
 RestartSec=5
 

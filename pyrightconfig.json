@@ -1,20 +1,26 @@
 {
   "typeCheckingMode": "off",
-  "extraPaths": ["compute/src"],
+  "extraPaths": ["backend/compute/src"],
   "executionEnvironments": [
     {
-      "root": "api",
-      "extraPaths": ["compute/src", "api/.venv/lib/python3.14/site-packages"],
-    },
-    {
-      "root": "queue",
-      "extraPaths": ["compute/src", "queue/.venv/lib/python3.14/site-packages"],
-    },
-    {
-      "root": "compute",
+      "root": "backend/api",
       "extraPaths": [
-        "compute/src",
-        "compute/.venv/lib/python3.14/site-packages",
+        "backend/compute/src",
+        "backend/.venv/lib/python3.14/site-packages",
+      ],
+    },
+    {
+      "root": "backend/queue",
+      "extraPaths": [
+        "backend/compute/src",
+        "backend/.venv/lib/python3.14/site-packages",
+      ],
+    },
+    {
+      "root": "backend/compute",
+      "extraPaths": [
+        "backend/compute/src",
+        "backend/.venv/lib/python3.14/site-packages",
       ],
     },
   ],

@@ -28,8 +28,9 @@ state, result id, requester email, duration), covering successes and failures.
 | `LOG_FORMAT` | `json`   | `json` (one object per line) or `text`.        |
 
 Secrets (`MASSIVE_API_KEY`, `DO_REDIS_CONNECTION`, `CLERK_*`, `RESEND_API_KEY`,
-`RESULTS_DIR`, ...) live in the repo-root `.env`; the apps load it with
-`python-dotenv`, which walks up from each service's working directory.
+`RESULTS_DIR`, ...) live in `backend/.env` (`/opt/bestee/backend/.env`); the apps
+load it with `python-dotenv`, which walks up from each service's working
+directory.
 
 ## One-time setup
 
@@ -39,11 +40,9 @@ sudo useradd --system --home /opt/bestee --shell /usr/sbin/nologin bestee
 sudo mkdir -p /opt/bestee /var/log/bestee
 sudo chown -R bestee:bestee /opt/bestee /var/log/bestee
 
-# 2. Code + venvs (as the bestee user), e.g.
+# 2. Code + shared workspace env (as the bestee user)
 sudo -u bestee git clone <repo> /opt/bestee
-sudo -u bestee bash -c 'cd /opt/bestee/compute && uv sync'
-sudo -u bestee bash -c 'cd /opt/bestee/queue   && uv sync'
-sudo -u bestee bash -c 'cd /opt/bestee/api     && uv sync'
+sudo -u bestee bash -c 'cd /opt/bestee/backend && uv sync --all-packages'
 
 # 3. Install the unit + logrotate files
 sudo cp deploy/bestee-queue.service deploy/bestee-api.service /etc/systemd/system/

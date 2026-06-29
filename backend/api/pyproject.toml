@@ -1,20 +1,20 @@
 [project]
-name = "queue"
+name = "api"
 version = "0.1.0"
-description = "Celery worker that runs the bestee-compute tuning optimizers as background jobs."
+description = "FastAPI producer that enqueues the bestee-compute tuning jobs onto the Celery queue."
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
     "bestee-compute",
     "celery[redis]>=5.6.3",
-    "dotenv>=0.9.9",
-    "pydantic>=2.13.4",
-    "pydo>=0.37.0",
-    "resend>=2.0.0",
+    "fastapi>=0.138.0",
+    "PyJWT>=2.8.0",
+    "python-dotenv>=1.0.1",
+    "uvicorn[standard]>=0.30",
 ]
 
 [tool.uv.sources]
-bestee-compute = { path = "../compute", editable = true }
+bestee-compute = { workspace = true }
 
 [tool.ruff]
 src = ["."]
@@ -32,6 +32,7 @@ pythonpath = ["."]
 
 [dependency-groups]
 dev = [
+    "httpx>=0.28",
     "pre-commit>=4.0",
     "pytest>=8.0",
     "ruff>=0.11",

@@ -34,9 +34,9 @@ htmlcov/
 *.swo
 
 # Generated data and plot artifacts (compute demo scripts)
-compute/scripts/*.parquet
-compute/scripts/*.csv
-compute/scripts/*.png
+backend/compute/scripts/*.parquet
+backend/compute/scripts/*.csv
+backend/compute/scripts/*.png
 
 # Persisted application logs and the per-task audit trail (LOG_DIR)
 logs/

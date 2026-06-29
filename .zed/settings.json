@@ -6,11 +6,11 @@
       // the editor means the squiggles you see are exactly the errors that
       // would fail CI — no noise, no discrepancy.
       //
-      // ty auto-discovers each subproject's venv from the nearest
-      // pyproject.toml, so the multi-venv monorepo works correctly
-      // without any extra configuration.
-      "language_servers": ["ty", "!pyright"]
-    }
+      // ty discovers the shared workspace venv (backend/.venv) from the
+      // backend/ uv workspace, so the monorepo works correctly without any
+      // extra configuration.
+      "language_servers": ["ty", "!pyright"],
+    },
   },
   "lsp": {
     "ty": {
@@ -18,8 +18,8 @@
         // Run ty's LSP server via uvx -- consistent with how pre-commit
         // invokes it and keeps the editor in sync with CI.
         "path": "uvx",
-        "arguments": ["ty", "server"]
-      }
-    }
-  }
+        "arguments": ["ty", "server"],
+      },
+    },
+  },
 }

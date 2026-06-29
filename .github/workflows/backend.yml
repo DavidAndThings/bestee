@@ -1,0 +1,51 @@
+name: backend
+
+# Path-filtered: runs only when the backend workspace (or this workflow)
+# changes. compute, api, and queue share one uv workspace (backend/uv.lock).
+on:
+  push:
+    branches: [main]
+    paths:
+      - "backend/**"
+      - ".github/workflows/backend.yml"
+  pull_request:
+    paths:
+      - "backend/**"
+      - ".github/workflows/backend.yml"
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+
+      - name: Set up Python
+        run: uv python install
+
+      - name: Install workspace
+        run: uv sync --all-packages
+
+      - name: Lint
+        run: |
+          for p in compute api queue; do (cd "$p" && uv run --no-sync ruff check .); done
+
+      - name: Format check
+        run: |
+          for p in compute api queue; do (cd "$p" && uv run --no-sync ruff format --check .); done
+
+      - name: Type check
+        run: |
+          for p in compute api queue; do (cd "$p" && uv run --no-sync ty check); done
+
+      - name: Test
+        run: |
+          for p in compute api queue; do (cd "$p" && uv run --no-sync pytest -q); done

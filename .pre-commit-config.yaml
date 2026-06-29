@@ -24,24 +24,24 @@ repos:
     hooks:
       - id: ty-compute
         name: ty check (compute)
-        entry: bash -c 'cd compute && uvx ty check'
+        entry: bash -c 'cd backend/compute && uv run --no-sync ty check'
         language: system
         types: [python]
-        files: ^compute/
+        files: ^backend/compute/
         pass_filenames: false
       - id: ty-queue
         name: ty check (queue)
-        entry: bash -c 'cd queue && uvx ty check'
+        entry: bash -c 'cd backend/queue && uv run --no-sync ty check'
         language: system
         types: [python]
-        files: ^queue/
+        files: ^backend/queue/
         pass_filenames: false
       - id: ty-api
         name: ty check (api)
-        entry: bash -c 'cd api && uvx ty check'
+        entry: bash -c 'cd backend/api && uv run --no-sync ty check'
         language: system
         types: [python]
-        files: ^api/
+        files: ^backend/api/
         pass_filenames: false
       - id: eslint-ui
         name: eslint (ui)

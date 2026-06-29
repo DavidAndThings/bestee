@@ -4,7 +4,7 @@
 # Logs: journalctl -u bestee-queue -f   (stdout)  and  /var/log/bestee/queue.log
 #
 # Adjust User, paths, and --concurrency to your droplet. Secrets are read from
-# the repo-root .env by the app itself (python-dotenv walks up from the
+# backend/.env by the app itself (python-dotenv walks up from the
 # WorkingDirectory); only LOG_DIR is set here so files land in /var/log/bestee.
 
 [Unit]
@@ -16,11 +16,11 @@ Wants=network-online.target
 Type=simple
 User=bestee
 Group=bestee
-WorkingDirectory=/opt/bestee/queue
+WorkingDirectory=/opt/bestee/backend/queue
 Environment=LOG_DIR=/var/log/bestee
 Environment=LOG_LEVEL=INFO
 Environment=LOG_FORMAT=json
-ExecStart=/opt/bestee/queue/.venv/bin/celery -A main worker --loglevel=INFO --concurrency=2
+ExecStart=/opt/bestee/backend/.venv/bin/celery -A main worker --loglevel=INFO --concurrency=2
 Restart=on-failure
 RestartSec=5
 

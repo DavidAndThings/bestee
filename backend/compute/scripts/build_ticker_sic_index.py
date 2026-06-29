@@ -5,7 +5,7 @@ from its ``TickerDetails``, and writes the ``{ticker: sic_code}`` map shipped
 with the package at ``resources/ticker_sic_codes.json``. This is the source for
 ``bestee_compute.stocks.tickers.get_tickers_by_sic_code``.
 
-Credentials come from the repo-root ``.env`` (``MASSIVE_API_KEY``), loaded by the
+Credentials come from ``backend/.env`` (``MASSIVE_API_KEY``), loaded by the
 Massive client. Run after a refresh is needed::
 
     uv run python scripts/build_ticker_sic_index.py
