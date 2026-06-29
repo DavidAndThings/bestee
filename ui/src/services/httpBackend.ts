@@ -12,10 +12,13 @@ import { getAuthToken } from "./auth";
  * reconciles that index with the authoritative state polled from the API.
  */
 
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? "").replace(
-  /\/+$/,
-  "",
-);
+// Tolerate stray surrounding quotes/backticks/whitespace from a hand-edited
+// .env (e.g. a copy-pasted backtick) and drop any trailing slash, so
+// `${API_BASE_URL}/path` is always a valid URL.
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? "")
+  .trim()
+  .replace(/^[`'"]+|[`'"]+$/g, "")
+  .replace(/\/+$/, "");
 
 /** UI schema id -> API `/tasks/{analysis}` path segment. */
 const ANALYSIS_PATH: Record<string, string> = {
