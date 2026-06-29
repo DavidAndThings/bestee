@@ -267,11 +267,17 @@ def _clustering_silhouette(
 # Regime labels
 # ----------------------------------------------------------------------------
 class RegimeRequest(BaseModel):
-    """User inputs for auto-tuned per-asset regime detection."""
+    """User inputs for auto-tuned per-asset regime detection.
+
+    With ``benchmark_ticker`` set, each asset is residualized against it via the
+    rolling market-model (OLS) regression; left unset, the residualization falls
+    back to rolling PCA over the basket itself, so a benchmark is optional.
+    """
 
     tickers: Sequence[str] = Field(min_length=1)
     start_date: str
     end_date: str
+    benchmark_ticker: str | None = None
 
 
 @dataclass
@@ -379,9 +385,18 @@ def optimize_regime(
     :func:`regimes.run_regime_analysis` (``regime_auto_select_states``); this
     tunes the residual window the features are built on and the VAR lag. Mean
     BIC across assets is a heuristic for the best global window/lag.
+
+    Residualization follows ``request.benchmark_ticker``: a market-model (OLS)
+    fit against the benchmark when one is given, else rolling PCA over the
+    basket (see :func:`regimes._residual_frames`).
     """
     if panel is None:
-        panel = _prepare_panel(request.tickers, request.start_date, request.end_date)
+        panel = _prepare_panel(
+            request.tickers,
+            request.start_date,
+            request.end_date,
+            benchmark_ticker=request.benchmark_ticker,
+        )
     best: RegimeTuning | None = None
     for window, lag in itertools.product(_REGIME_WINDOWS, _REGIME_LAGS):
         config = AnalysisConfig(
@@ -389,7 +404,7 @@ def optimize_regime(
             start_date=request.start_date,
             end_date=request.end_date,
             injected_panel=panel,
-            residualization_method="pca",
+            benchmark_ticker=request.benchmark_ticker,
             residualization_window=window,
             normalization_window=window,
             regime_hmm_lag=lag,

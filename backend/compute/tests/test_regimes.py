@@ -17,7 +17,11 @@ import pytest
 
 from bestee_compute.stocks.models import OHLCHeader
 from bestee_compute.workflow import regimes
-from bestee_compute.workflow.tools import AnalysisConfig
+from bestee_compute.workflow.tools import (
+    AnalysisConfig,
+    get_ols_residuals,
+    get_pca_residuals,
+)
 
 TS = OHLCHeader.TIMESTAMP
 CLOSE = OHLCHeader.CLOSE
@@ -218,6 +222,30 @@ class TestRegimeAnalysisRunner:
             _config(_regime_close_panel(tickers), tickers, regime_features=[])
 
 
+class TestBenchmarkResidualization:
+    def test_benchmark_switches_regime_features_to_ols(self) -> None:
+        tickers = ["AAA", "BBB", "CCC"]
+        benchmark = "MKT"
+        panel = _regime_close_panel([*tickers, benchmark], n_days=600)
+        config = _config(panel, tickers, benchmark_ticker=benchmark)
+
+        raw, _normalized = regimes._residual_frames(config, "all")
+        assert all(f"{ticker}_OLS_Residual" in raw.columns for ticker in tickers)
+        assert raw.equals(get_ols_residuals(config, "all"))
+
+        results = regimes.run_regime_analysis(config)
+        assert results and set(results) <= set(tickers)
+
+    def test_no_benchmark_falls_back_to_pca(self) -> None:
+        tickers = ["AAA", "BBB", "CCC"]
+        config = _config(_regime_close_panel(tickers, n_days=600), tickers)
+        assert config.benchmark_ticker is None
+
+        raw, _normalized = regimes._residual_frames(config, "all")
+        assert all(f"{ticker}_PCA_Residual" in raw.columns for ticker in tickers)
+        assert raw.equals(get_pca_residuals(config, "all"))
+
+
 class TestOutOfSampleRegimePrediction:
     def test_predicts_oos_regimes_with_fixed_model(self) -> None:
         tickers = ["AAA", "BBB", "CCC"]
@@ -271,6 +299,19 @@ class TestOutOfSampleRegimePrediction:
             assert frame[f"{ticker}_Regime_Prob"][0] == pytest.approx(
                 float(posterior.max())
             )
+
+    def test_honors_benchmark_residualization(self) -> None:
+        tickers = ["AAA", "BBB"]
+        benchmark = "MKT"
+        panel = _regime_close_panel([*tickers, benchmark], n_days=600, seed=4)
+        config = _config(
+            panel, tickers, benchmark_ticker=benchmark, end_date="2024-09-30"
+        )
+        frame = regimes.predict_oos_regimes(config, ["2024-10-15", "2024-11-15"])
+        assert frame.height == 2
+        for ticker in tickers:
+            labels = frame[f"{ticker}_Regime"].to_numpy()
+            assert set(np.unique(labels)) <= {0, 1}
 
     def test_requires_oos_dates(self) -> None:
         tickers = ["AAA"]

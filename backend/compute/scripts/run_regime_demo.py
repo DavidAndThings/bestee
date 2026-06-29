@@ -62,7 +62,7 @@ def _build_config() -> AnalysisConfig:
         start_date=START,
         end_date=END,
         ohlc_column=OHLCHeader.CLOSE,
-        residualization_method="ols",
+        # A benchmark_ticker selects market-model (OLS) residualization.
         residualization_window=RESIDUALIZATION_WINDOW,
         normalization_window=NORMALIZATION_WINDOW,
         regime_hmm_hidden_states=HIDDEN_STATES,

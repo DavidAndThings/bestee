@@ -8,6 +8,11 @@ vector-autoregression with regime-specific coefficients and innovation
 covariance. One HMM is fit **per asset**, so every name gets its own regime
 path (e.g. calm vs. turbulent idiosyncratic dynamics).
 
+The residual is market-model (OLS) idiosyncratic return when a
+``benchmark_ticker`` is set -- each asset regressed on the benchmark over a
+rolling window -- and rolling-PCA reconstruction error over the basket itself
+when it is not, so a benchmark is optional rather than required.
+
 The volatility feature is taken from the *raw* residual, not the normalized one:
 ``get_normalized_*`` z-scores over a rolling window, so the normalized residual
 has ~unit rolling variance by construction and its trailing volatility carries
@@ -488,14 +493,21 @@ def _residual_frames(
     config: AnalysisConfig,
     ticker_class: TickerClass,
 ) -> tuple[pl.DataFrame, pl.DataFrame]:
-    if config.residualization_method == "pca":
+    """Raw and normalized idiosyncratic residuals for the regime features.
+
+    With a ``benchmark_ticker`` set, residualize each asset against it via the
+    rolling market-model (OLS) regression -- the benchmark is the explicit
+    market factor. Otherwise fall back to rolling-PCA residualization, which
+    strips the basket's own leading factor(s) without needing a benchmark.
+    """
+    if config.benchmark_ticker is not None:
         return (
-            get_pca_residuals(config, ticker_class),
-            get_normalized_pca_residuals(config, ticker_class),
+            get_ols_residuals(config, ticker_class),
+            get_normalized_ols_residuals(config, ticker_class),
         )
     return (
-        get_ols_residuals(config, ticker_class),
-        get_normalized_ols_residuals(config, ticker_class),
+        get_pca_residuals(config, ticker_class),
+        get_normalized_pca_residuals(config, ticker_class),
     )
 
 
