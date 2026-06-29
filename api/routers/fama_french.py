@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends
 
 from auth import get_user_email
 from celery_client import dispatch
+from resolve import resolve_request
 from schemas import TaskHandle
 
 router = APIRouter(prefix="/tasks", tags=["fama-french"])
@@ -18,5 +19,5 @@ def submit_fama_french(
     email: Annotated[str | None, Depends(get_user_email)],
 ) -> TaskHandle:
     """Enqueue a Fama-French job and return its task id."""
-    task_id = dispatch("tuning.optimize_fama_french", request.model_dump(), email)
+    task_id = dispatch("tuning.optimize_fama_french", resolve_request(request), email)
     return TaskHandle(task_id=task_id)

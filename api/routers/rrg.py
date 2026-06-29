@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends
 
 from auth import get_user_email
 from celery_client import dispatch
+from resolve import resolve_request
 from schemas import TaskHandle
 
 router = APIRouter(prefix="/tasks", tags=["rrg"])
@@ -18,5 +19,5 @@ def submit_rrg(
     email: Annotated[str | None, Depends(get_user_email)],
 ) -> TaskHandle:
     """Enqueue an RRG job and return its task id."""
-    task_id = dispatch("tuning.optimize_rrg", request.model_dump(), email)
+    task_id = dispatch("tuning.optimize_rrg", resolve_request(request), email)
     return TaskHandle(task_id=task_id)

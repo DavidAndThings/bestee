@@ -22,6 +22,27 @@ main.app.dependency_overrides[require_auth] = lambda: {"sub": "test_user"}
 
 client = TestClient(main.app)
 
+
+@pytest.fixture(autouse=True)
+def _stub_resolvers():
+    """Resolve ticker terms to themselves so submit tests stay offline.
+
+    The real resolvers hit the Massive API; identity stubs keep the dispatched
+    payload equal to the request body unless a test overrides them.
+    """
+    with (
+        patch(
+            "resolve.resolve_terms_to_tickers",
+            side_effect=lambda terms, **_: list(terms),
+        ),
+        patch(
+            "resolve.resolve_term_to_ticker",
+            side_effect=lambda term, **_: term,
+        ),
+    ):
+        yield
+
+
 SUBMIT_CASES = [
     (
         "/tasks/clustering",
@@ -121,6 +142,88 @@ def test_rrg_ticker_reference_requires_benchmark() -> None:
         "reference_type": "ticker",
     }
     response = client.post("/tasks/rrg", json=body)
+    assert response.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# Term -> ticker resolution at submission
+# ---------------------------------------------------------------------------
+
+
+def test_submit_resolves_terms_to_tickers() -> None:
+    """Industry-title / company-name terms are expanded before dispatch."""
+    sent = MagicMock()
+    sent.id = "task-resolve"
+    with (
+        patch(
+            "resolve.resolve_terms_to_tickers",
+            return_value=["AAPL", "MSFT", "ADBE"],
+        ),
+        patch("celery_client.celery_app.send_task", return_value=sent) as send,
+    ):
+        response = client.post(
+            "/tasks/clustering",
+            json={
+                "tickers": ["SERVICES-PREPACKAGED SOFTWARE", "Apple Inc."],
+                "start_date": "2020-01-01",
+                "end_date": "2020-12-31",
+            },
+        )
+    assert response.status_code == 202
+    assert send.call_args.kwargs["args"][0]["tickers"] == ["AAPL", "MSFT", "ADBE"]
+
+
+def test_submit_resolves_rrg_benchmark() -> None:
+    """A benchmark term is resolved to a single symbol before dispatch."""
+    sent = MagicMock()
+    sent.id = "task-bench"
+    with (
+        patch("resolve.resolve_terms_to_tickers", return_value=["AAPL"]),
+        patch("resolve.resolve_term_to_ticker", return_value="SPY"),
+        patch("celery_client.celery_app.send_task", return_value=sent) as send,
+    ):
+        response = client.post(
+            "/tasks/rrg",
+            json={
+                "tickers": ["Apple Inc."],
+                "start_date": "2020-01-01",
+                "end_date": "2020-12-31",
+                "reference_type": "ticker",
+                "benchmark_ticker": "SPDR S&P 500 ETF Trust",
+            },
+        )
+    assert response.status_code == 202
+    payload = send.call_args.kwargs["args"][0]
+    assert payload["tickers"] == ["AAPL"]
+    assert payload["benchmark_ticker"] == "SPY"
+
+
+def test_submit_422_when_no_securities_match() -> None:
+    """Terms that resolve to nothing are rejected synchronously."""
+    with patch("resolve.resolve_terms_to_tickers", return_value=[]):
+        response = client.post(
+            "/tasks/regime",
+            json={
+                "tickers": ["No Such Industry"],
+                "start_date": "2020-01-01",
+                "end_date": "2020-12-31",
+            },
+        )
+    assert response.status_code == 422
+    assert "matched" in response.json()["detail"].lower()
+
+
+def test_submit_422_when_resolution_below_cluster_minimum() -> None:
+    """Two terms that resolve to one security fail clustering's >=2 rule."""
+    with patch("resolve.resolve_terms_to_tickers", return_value=["AAPL"]):
+        response = client.post(
+            "/tasks/clustering",
+            json={
+                "tickers": ["Apple Inc.", "Apple Computer"],
+                "start_date": "2020-01-01",
+                "end_date": "2020-12-31",
+            },
+        )
     assert response.status_code == 422
 
 
