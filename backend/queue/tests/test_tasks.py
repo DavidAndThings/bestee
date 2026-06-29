@@ -10,8 +10,8 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
+import main
 import tasks
-from main import get_celery_app
 
 _TASKS: dict[str, Any] = {
     "tuning.optimize_clustering": tasks.optimize_clustering,
@@ -27,10 +27,9 @@ def test_task_is_registered_under_its_name(name: str, task: Any) -> None:
 
 
 def test_app_is_configured_for_json_results() -> None:
-    app = get_celery_app()
-    assert app.conf.task_serializer == "json"
-    assert app.conf.result_serializer == "json"
-    assert app.conf.accept_content == ["json"]
+    assert main.app.conf.task_serializer == "json"
+    assert main.app.conf.result_serializer == "json"
+    assert main.app.conf.accept_content == ["json"]
 
 
 @pytest.mark.parametrize("task", _TASKS.values())

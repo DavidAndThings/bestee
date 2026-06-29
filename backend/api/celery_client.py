@@ -1,46 +1,17 @@
 """Celery *producer* client.
 
 The API does not run the analyses -- it only enqueues them: this client talks to
-the same Redis broker / backend as the ``queue`` worker and dispatches tasks by
-their registered name, then reads results back by task id.
+the same Redis broker / backend as the ``queue`` worker (built from the shared
+:func:`bestee_tasking.build_celery_app` factory) and dispatches tasks by their
+registered name, then reads results back by task id.
 """
 
-import os
 from typing import Any
 
-from celery import Celery
+from bestee_tasking import build_celery_app
 from celery.result import AsyncResult
-from dotenv import load_dotenv
 
-
-def _with_ssl_cert_reqs(url: str | None) -> str | None:
-    """Ensure a TLS Redis URL (``rediss://``) carries an ``ssl_cert_reqs`` param.
-
-    Celery's Redis result backend rejects a ``rediss://`` URL that omits
-    ``ssl_cert_reqs``.  Managed Redis (e.g. DigitalOcean) uses ``rediss://``;
-    default to ``CERT_NONE`` (encrypted, no certificate verification -- matching
-    kombu's broker fallback) unless the URL already sets it.
-    """
-    if url and url.startswith("rediss://") and "ssl_cert_reqs" not in url:
-        separator = "&" if "?" in url else "?"
-        return f"{url}{separator}ssl_cert_reqs=CERT_NONE"
-    return url
-
-
-def build_celery_app() -> Celery:
-    """Build the producer Celery app from ``DO_REDIS_CONNECTION``."""
-    load_dotenv()
-    redis_connection = _with_ssl_cert_reqs(os.environ.get("DO_REDIS_CONNECTION"))
-    app = Celery("api", broker=redis_connection, backend=redis_connection)
-    app.conf.update(
-        task_serializer="json",
-        result_serializer="json",
-        accept_content=["json"],
-    )
-    return app
-
-
-celery_app = build_celery_app()
+celery_app = build_celery_app("api")
 
 
 def dispatch(

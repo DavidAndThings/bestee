@@ -36,16 +36,16 @@ jobs:
 
       - name: Lint
         run: |
-          for p in compute api queue; do (cd "$p" && uv run --no-sync ruff check .); done
+          for p in compute tasking api queue; do (cd "$p" && uv run --no-sync ruff check .); done
 
       - name: Format check
         run: |
-          for p in compute api queue; do (cd "$p" && uv run --no-sync ruff format --check .); done
+          for p in compute tasking api queue; do (cd "$p" && uv run --no-sync ruff format --check .); done
 
       - name: Type check
         run: |
-          for p in compute api queue; do (cd "$p" && uv run --no-sync ty check); done
+          for p in compute tasking api queue; do (cd "$p" && uv run --no-sync ty check); done
 
       - name: Test
         run: |
-          for p in compute api queue; do (cd "$p" && uv run --no-sync pytest -q); done
+          for p in compute tasking api queue; do (cd "$p" && uv run --no-sync pytest -q); done

@@ -7,7 +7,7 @@
 # the common commands out across the workspace members; the UI keeps its own
 # npm scripts and has dedicated `ui-*` targets.
 
-PY := compute api queue
+PY := compute tasking api queue
 
 .PHONY: help sync test lint fmt typecheck check ui-install ui-dev ui-build ui-preview api-dev queue-dev dev
 

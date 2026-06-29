@@ -5,6 +5,7 @@ Bestee is a small set of cooperating projects:
 | Package          | Path               | Language    | Role                                                                 |
 |------------------|--------------------|-------------|----------------------------------------------------------------------|
 | `bestee-compute` | `backend/compute/` | Python 3.14 | Financial-data DSL and indicator pipeline on top of the Massive API. |
+| `bestee-tasking` | `backend/tasking/` | Python 3.14 | Shared Celery app factory + Redis wiring for the producer and worker.|
 | `bestee-queue`   | `backend/queue/`   | Python 3.14 | Celery worker that runs the `bestee-compute` tuning optimizers.      |
 | `bestee-api`     | `backend/api/`     | Python 3.14 | FastAPI producer that enqueues tuning jobs and serves their results. |
 | (UI)             | `ui/`              | TypeScript  | React + Vite frontend (Clerk auth).                                  |

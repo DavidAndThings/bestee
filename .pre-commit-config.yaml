@@ -29,6 +29,13 @@ repos:
         types: [python]
         files: ^backend/compute/
         pass_filenames: false
+      - id: ty-tasking
+        name: ty check (tasking)
+        entry: bash -c 'cd backend/tasking && uv run --no-sync ty check'
+        language: system
+        types: [python]
+        files: ^backend/tasking/
+        pass_filenames: false
       - id: ty-queue
         name: ty check (queue)
         entry: bash -c 'cd backend/queue && uv run --no-sync ty check'
