@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { jobsApi } from "../services/jobsApi";
-import type { SicCode } from "../lib/types";
+import type { SicCode, SicTicker } from "../lib/types";
 
 type ListState =
   | { status: "loading" }
@@ -10,7 +10,7 @@ type ListState =
 type TickersState =
   | { status: "loading" }
   | { status: "error" }
-  | { status: "ready"; tickers: string[] };
+  | { status: "ready"; tickers: SicTicker[] };
 
 // SEC publishes ~1,000 SIC codes; cap the rendered rows and nudge the user to
 // filter rather than paint the whole list at once.
@@ -82,7 +82,9 @@ export default function SicCodesPage() {
     <div className="p-4 sm:p-8">
       <div className="mx-auto max-w-5xl">
         <div className="mb-6 px-1">
-          <h1 className="text-2xl font-semibold sm:text-3xl">SIC Code Directory</h1>
+          <h1 className="text-2xl font-semibold sm:text-3xl">
+            SIC Code Directory
+          </h1>
           <p className="text-base-content/70 mt-2 max-w-2xl">
             Standard Industrial Classification codes and their industry titles.
             Click a row to see the tickers classified under that code.
@@ -149,7 +151,9 @@ export default function SicCodesPage() {
             </div>
             <p className="text-base-content/50 mt-3 text-sm">
               Showing {visible.length} of {filtered.length}
-              {filtered.length > MAX_ROWS && " — refine your filter to narrow it"}.
+              {filtered.length > MAX_ROWS &&
+                " — refine your filter to narrow it"}
+              .
             </p>
           </>
         )}
@@ -179,16 +183,21 @@ export default function SicCodesPage() {
                   No tickers are classified under this code.
                 </p>
               ) : (
-                <div className="flex flex-wrap gap-2">
-                  {tickers.tickers.map((ticker) => (
-                    <span
-                      key={ticker}
-                      className="badge badge-primary badge-outline font-mono"
+                <ul className="divide-base-300 max-h-[50vh] divide-y overflow-auto">
+                  {tickers.tickers.map((entry) => (
+                    <li
+                      key={entry.ticker}
+                      className="flex items-baseline gap-3 py-2"
                     >
-                      {ticker}
-                    </span>
+                      <span className="badge badge-primary badge-outline shrink-0 font-mono">
+                        {entry.ticker}
+                      </span>
+                      <span className="text-base-content/70 truncate text-sm">
+                        {entry.name ?? "\u2014"}
+                      </span>
+                    </li>
                   ))}
-                </div>
+                </ul>
               )}
             </div>
 

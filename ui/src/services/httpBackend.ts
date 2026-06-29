@@ -1,4 +1,4 @@
-import type { Job, JobStatus, SicCode } from "../lib/types";
+import type { Job, JobStatus, SicCode, SicTicker } from "../lib/types";
 import type { SubmitJobInput, SubmitJobResult } from "./mockBackend";
 import { getAuthToken } from "./auth";
 
@@ -173,7 +173,10 @@ export async function listSicCodes(): Promise<SicCode[]> {
   }));
 }
 
-export async function tickersForSic(sicCode: string): Promise<string[]> {
+/** One ticker row as returned by `GET /sic/{code}/tickers` (`SicTicker`). */
+type ApiSicTicker = { ticker: string; name: string | null };
+
+export async function tickersForSic(sicCode: string): Promise<SicTicker[]> {
   const url = `${API_BASE_URL}/sic/${encodeURIComponent(sicCode)}/tickers`;
   const response = await fetch(url, { headers: await authHeaders() });
   if (!response.ok) {
@@ -182,8 +185,11 @@ export async function tickersForSic(sicCode: string): Promise<string[]> {
     );
     throw new Error(`Failed to load tickers (${response.status})`);
   }
-  const data = (await response.json()) as { tickers?: string[] };
-  return Array.isArray(data.tickers) ? data.tickers : [];
+  const data = (await response.json()) as { tickers?: ApiSicTicker[] };
+  return (data.tickers ?? []).map((row) => ({
+    ticker: row.ticker,
+    name: row.name ?? null,
+  }));
 }
 
 export async function search(query: string, limit = 20): Promise<string[]> {

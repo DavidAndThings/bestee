@@ -6,6 +6,12 @@ export type SicCode = {
   industryTitle: string;
 };
 
+/** A ticker symbol and its company name. */
+export type SicTicker = {
+  ticker: string;
+  name: string | null;
+};
+
 /** A submitted chart job, uniquely identified by a uuid. */
 export type Job = {
   id: string;

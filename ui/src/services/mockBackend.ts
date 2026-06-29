@@ -1,4 +1,4 @@
-import type { Job, SicCode } from "../lib/types";
+import type { Job, SicCode, SicTicker } from "../lib/types";
 
 /**
  * A stand-in for a real backend. Jobs are persisted to localStorage, namespaced
@@ -257,17 +257,63 @@ const SIC_CODES: SicCode[] = [
 ];
 
 /** Mock ticker membership per SIC code; unmapped codes return none. */
-const SIC_TICKERS: Record<string, string[]> = {
-  "1311": ["XOM", "CVX", "COP", "OXY"],
-  "2080": ["KO", "PEP", "MNST"],
-  "2834": ["PFE", "MRK", "LLY", "ABBV", "BMY"],
-  "3571": ["AAPL", "DELL", "HPQ"],
-  "3674": ["NVDA", "AVGO", "AMD", "TXN", "MU", "QCOM"],
-  "3711": ["TSLA", "GM", "F"],
-  "3721": ["BA"],
-  "5812": ["MCD", "SBUX", "CMG", "YUM"],
-  "6021": ["JPM", "BAC", "WFC", "C"],
-  "7372": ["MSFT", "ORCL", "ADBE", "CRM", "NOW"],
+const SIC_TICKERS: Record<string, SicTicker[]> = {
+  "1311": [
+    { ticker: "XOM", name: "Exxon Mobil Corporation" },
+    { ticker: "CVX", name: "Chevron Corporation" },
+    { ticker: "COP", name: "ConocoPhillips" },
+    { ticker: "OXY", name: "Occidental Petroleum Corporation" },
+  ],
+  "2080": [
+    { ticker: "KO", name: "Coca-Cola Company" },
+    { ticker: "PEP", name: "PepsiCo, Inc." },
+    { ticker: "MNST", name: "Monster Beverage Corporation" },
+  ],
+  "2834": [
+    { ticker: "PFE", name: "Pfizer Inc." },
+    { ticker: "MRK", name: "Merck & Co., Inc." },
+    { ticker: "LLY", name: "Eli Lilly and Company" },
+    { ticker: "ABBV", name: "AbbVie Inc." },
+    { ticker: "BMY", name: "Bristol-Myers Squibb Company" },
+  ],
+  "3571": [
+    { ticker: "AAPL", name: "Apple Inc." },
+    { ticker: "DELL", name: "Dell Technologies Inc." },
+    { ticker: "HPQ", name: "HP Inc." },
+  ],
+  "3674": [
+    { ticker: "NVDA", name: "NVIDIA Corporation" },
+    { ticker: "AVGO", name: "Broadcom Inc." },
+    { ticker: "AMD", name: "Advanced Micro Devices, Inc." },
+    { ticker: "TXN", name: "Texas Instruments Incorporated" },
+    { ticker: "MU", name: "Micron Technology, Inc." },
+    { ticker: "QCOM", name: "QUALCOMM Incorporated" },
+  ],
+  "3711": [
+    { ticker: "TSLA", name: "Tesla, Inc." },
+    { ticker: "GM", name: "General Motors Company" },
+    { ticker: "F", name: "Ford Motor Company" },
+  ],
+  "3721": [{ ticker: "BA", name: "Boeing Company" }],
+  "5812": [
+    { ticker: "MCD", name: "McDonald's Corporation" },
+    { ticker: "SBUX", name: "Starbucks Corporation" },
+    { ticker: "CMG", name: "Chipotle Mexican Grill, Inc." },
+    { ticker: "YUM", name: "Yum! Brands, Inc." },
+  ],
+  "6021": [
+    { ticker: "JPM", name: "JPMorgan Chase & Co." },
+    { ticker: "BAC", name: "Bank of America Corporation" },
+    { ticker: "WFC", name: "Wells Fargo & Company" },
+    { ticker: "C", name: "Citigroup Inc." },
+  ],
+  "7372": [
+    { ticker: "MSFT", name: "Microsoft Corporation" },
+    { ticker: "ORCL", name: "Oracle Corporation" },
+    { ticker: "ADBE", name: "Adobe Inc." },
+    { ticker: "CRM", name: "Salesforce, Inc." },
+    { ticker: "NOW", name: "ServiceNow, Inc." },
+  ],
 };
 
 /** The full SIC code list (mocked). */
@@ -275,8 +321,8 @@ export function listSicCodes(): Promise<SicCode[]> {
   return delay(SIC_CODES.slice(), 200);
 }
 
-/** Ticker symbols classified under *sicCode* (mocked). */
-export function tickersForSic(sicCode: string): Promise<string[]> {
+/** Tickers (with company names) classified under *sicCode* (mocked). */
+export function tickersForSic(sicCode: string): Promise<SicTicker[]> {
   return delay((SIC_TICKERS[sicCode] ?? []).slice(), 200);
 }
 
