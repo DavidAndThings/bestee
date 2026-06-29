@@ -16,6 +16,9 @@ validate against a single source of truth.
 | `POST` | `/tasks/fama-french`     | `FamaFrenchRequest`   | Enqueue an auto-tuned Fama-French fit.       |
 | `POST` | `/tasks/rrg`             | `RRGRequest`          | Enqueue an auto-tuned relative-rotation job. |
 | `GET`  | `/jobs/{task_id}`        | --                    | Poll a job's state, result, or error.        |
+| `GET`  | `/search`                | --                    | Search SIC titles + company names (`?q=`).   |
+| `GET`  | `/sic`                   | --                    | List every SIC code and its industry title.  |
+| `GET`  | `/sic/{sic_code}/tickers`| --                    | Tickers classified under a SIC code.         |
 | `GET`  | `/health`                | --                    | Liveness probe.                              |
 
 A successful `POST` returns `202 Accepted` with a `TaskHandle` (`{"task_id": ...}`).

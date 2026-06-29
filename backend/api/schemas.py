@@ -49,3 +49,25 @@ class SearchResults(BaseModel):
     query: str
     count: int
     results: list[str]
+
+
+class SicCode(BaseModel):
+    """A single SIC industry code and its title."""
+
+    sic_code: str
+    industry_title: str
+
+
+class SicCodeList(BaseModel):
+    """The full list of SIC industry codes."""
+
+    count: int
+    codes: list[SicCode]
+
+
+class SicTickers(BaseModel):
+    """The ticker symbols classified under a SIC code."""
+
+    sic_code: str
+    count: int
+    tickers: list[str]

@@ -496,6 +496,44 @@ def test_search_requires_query() -> None:
     assert response.status_code == 422
 
 
+# ---------------------------------------------------------------------------
+# GET /sic  and  GET /sic/{sic_code}/tickers
+# ---------------------------------------------------------------------------
+
+
+def test_list_sic_codes() -> None:
+    import polars as pl
+
+    df = pl.DataFrame(
+        {
+            "SIC Code": ["7372", "6021"],
+            "Industry Title": [
+                "SERVICES-PREPACKAGED SOFTWARE",
+                "NATIONAL COMMERCIAL BANKS",
+            ],
+        }
+    )
+    with patch("routers.sic.get_sic_codes_df", return_value=df):
+        response = client.get("/sic")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["count"] == 2
+    assert data["codes"][0] == {
+        "sic_code": "7372",
+        "industry_title": "SERVICES-PREPACKAGED SOFTWARE",
+    }
+
+
+def test_tickers_for_sic_code() -> None:
+    with patch("routers.sic.get_tickers_by_sic_code", return_value=["AAA", "BBB"]):
+        response = client.get("/sic/7372/tickers")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["sic_code"] == "7372"
+    assert data["count"] == 2
+    assert data["tickers"] == ["AAA", "BBB"]
+
+
 def test_get_result_returns_404_for_missing_result() -> None:
     with patch("routers.results._get_results_dir", return_value=Path("/no/such/dir")):
         response = client.get("/results/clustering_abc123def4")

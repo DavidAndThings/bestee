@@ -21,7 +21,7 @@ from kombu.exceptions import OperationalError
 from redis.exceptions import RedisError
 
 from auth import require_auth
-from routers import clustering, fama_french, jobs, regime, results, rrg, ticker
+from routers import clustering, fama_french, jobs, regime, results, rrg, sic, ticker
 
 load_dotenv()
 
@@ -73,6 +73,7 @@ app.include_router(fama_french.router, dependencies=_auth)
 app.include_router(rrg.router, dependencies=_auth)
 app.include_router(jobs.router, dependencies=_auth)
 app.include_router(results.router, dependencies=_auth)
+app.include_router(sic.router, dependencies=_auth)
 app.include_router(ticker.router, dependencies=_auth)
 
 
