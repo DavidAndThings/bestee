@@ -9,7 +9,7 @@
 
 PY := compute tasking api queue
 
-.PHONY: help sync test lint fmt typecheck check ui-install ui-dev ui-build ui-preview api-dev queue-dev dev
+.PHONY: help sync test lint fmt typecheck check ui-install ui-dev ui-build ui-preview free-api-port api-dev queue-dev dev
 
 help:  ## List available targets
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -51,16 +51,25 @@ ui-preview:  ## preview the production build of the UI
 # the API instead of its built-in mock, set
 # VITE_API_BASE_URL=http://localhost:8000 in ui/.env.local.
 
-api-dev: sync  ## Run the API (uvicorn, autoreload) on :8000
+free-api-port:  ## Stop any stale listener bound to :8000 (orphaned uvicorn, etc.)
+	@PIDS="$$(lsof -ti tcp:8000 -sTCP:LISTEN 2>/dev/null)"; \
+	if [ -n "$$PIDS" ]; then \
+		echo "Freeing port 8000 (stopping PID(s) $$PIDS)"; \
+		kill $$PIDS 2>/dev/null || true; sleep 1; \
+		PIDS="$$(lsof -ti tcp:8000 -sTCP:LISTEN 2>/dev/null)"; \
+		if [ -n "$$PIDS" ]; then kill -9 $$PIDS 2>/dev/null || true; sleep 1; fi; \
+	fi
+
+api-dev: sync free-api-port  ## Run the API (uvicorn, autoreload) on :8000
 	cd backend/api && uv run --no-sync uvicorn main:app --reload --port 8000
 
 queue-dev: sync  ## Run the Celery worker that processes submitted jobs
 	cd backend/queue && uv run --no-sync celery -A main worker --loglevel=info
 
-dev: sync  ## Run API + worker + UI together (Ctrl-C stops all). Needs remote Redis.
+dev: sync free-api-port  ## Run API + worker + UI together (Ctrl-C stops all). Needs remote Redis.
 	@echo "Starting API :8000, Celery worker, and UI :5173. Ctrl-C stops all."
 	@echo "Prereqs: backend/.env (DO_REDIS_CONNECTION, MASSIVE_API_KEY) + ui/.env.local VITE_API_BASE_URL=http://localhost:8000"
-	@trap 'kill 0' INT TERM EXIT; \
+	@trap 'kill 0' INT TERM HUP EXIT; \
 	(cd backend/api && uv run --no-sync uvicorn main:app --reload --port 8000) & \
 	(cd backend/queue && uv run --no-sync celery -A main worker --loglevel=info) & \
 	(cd ui && npm run dev) & \
