@@ -290,15 +290,31 @@ const REGIME_DETECTION_SCHEMA: Schema = {
         "Optional benchmark security. When set, each asset is residualized against it with a rolling market-model (OLS) regression; left blank, residualization falls back to PCA over the basket itself.",
       optional: true,
     },
+    oos_date: {
+      type: "date",
+      description:
+        "Optional out-of-sample date (after the end date). When set, the fitted model is held fixed and used to classify the regime on that date, included alongside the in-sample labels.",
+      optional: true,
+    },
   },
   validate: (payload) => {
     const errors: Record<string, string> = {};
     const start = payload.start_date;
     const end = payload.end_date;
+    const oos = payload.oos_date;
     if (typeof start === "string" && typeof end === "string" && start > end) {
       errors.end_date = "The end date must be on or after the start date.";
     }
+    if (typeof end === "string" && typeof oos === "string" && oos <= end) {
+      errors.oos_date = "The out-of-sample date must be after the end date.";
+    }
     return errors;
+  },
+  // The model takes a list of `oos_dates`; the form collects a single optional
+  // date, wrapped into that list here (omitted when left blank).
+  toRequestBody: (payload) => {
+    const { oos_date, ...rest } = payload;
+    return oos_date ? { ...rest, oos_dates: [oos_date] } : rest;
   },
 };
 

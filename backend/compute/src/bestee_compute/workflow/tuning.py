@@ -22,7 +22,7 @@ import itertools
 import json
 import logging
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Self
 
@@ -107,6 +107,37 @@ def _serialize_frame(df: pl.DataFrame) -> list[dict[str, Any]]:
     return (df.with_columns(casts) if casts else df).to_dicts()
 
 
+def frame_to_table(frame: pl.DataFrame) -> dict[str, Any]:
+    """A JSON-safe table view of *frame*: ordered column names + record rows.
+
+    Used by the results API to serve an analysis-specific ``aspect`` -- the
+    ``columns`` give the canonical order, ``rows`` are the records (temporal
+    columns stringified by :func:`_serialize_frame`).
+    """
+    return {"columns": frame.columns, "rows": _serialize_frame(frame)}
+
+
+def _unpivot_by_ticker(
+    frame: pl.DataFrame, suffix: str, value_name: str
+) -> pl.DataFrame:
+    """Wide ``{ticker}_{suffix}`` frame -> long ``[timestamp, ticker, value_name]``.
+
+    The per-ticker value columns are melted into rows; the ``_{suffix}`` tag is
+    stripped back off the column name to recover the bare ticker symbol.
+    """
+    value_columns = [c for c in frame.columns if c != OHLCHeader.TIMESTAMP]
+    return (
+        frame.unpivot(
+            index=OHLCHeader.TIMESTAMP,
+            on=value_columns,
+            variable_name="ticker",
+            value_name=value_name,
+        )
+        .with_columns(pl.col("ticker").str.replace(f"_{suffix}$", ""))
+        .rename({OHLCHeader.TIMESTAMP: "timestamp"})
+    )
+
+
 def result_id(analysis: str, request: BaseModel) -> str:
     """Stable ``{analysis}_{sha256[:16]}`` key for a (analysis_type, request) pair.
 
@@ -170,6 +201,16 @@ class ClusteringTuning:
             "silhouette": self.silhouette,
             "n_clusters": self.n_clusters,
         }
+
+    def cluster_label_table(self) -> pl.DataFrame:
+        """``cluster_label`` aspect: one ``[ticker, cluster_label]`` row per name."""
+        return pl.DataFrame(
+            {
+                "ticker": list(self.labels.keys()),
+                "cluster_label": list(self.labels.values()),
+            },
+            schema={"ticker": pl.Utf8, "cluster_label": pl.Int64},
+        ).sort("ticker")
 
     def save(self, path: Path) -> None:
         """Persist to *path* as a single ``metadata.json`` file."""
@@ -290,17 +331,39 @@ class RegimeRequest(BaseModel):
     With ``benchmark_ticker`` set, each asset is residualized against it via the
     rolling market-model (OLS) regression; left unset, the residualization falls
     back to rolling PCA over the basket itself, so a benchmark is optional.
+
+    ``oos_dates`` are optional out-of-sample dates (each strictly after
+    ``end_date``). When given, the best-fit model is held **fixed** and used to
+    classify the regime at each date; those labels are carried in the result
+    alongside the full in-sample regime path.
     """
 
     tickers: Sequence[str] = Field(min_length=1)
     start_date: str
     end_date: str
     benchmark_ticker: str | None = None
+    oos_dates: Sequence[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _oos_dates_after_end(self) -> Self:
+        end = dt.date.fromisoformat(self.end_date[:10])
+        for oos_date in self.oos_dates:
+            if dt.date.fromisoformat(oos_date[:10]) <= end:
+                raise ValueError(
+                    f"oos_date {oos_date!r} must be strictly after end_date "
+                    f"{self.end_date!r}"
+                )
+        return self
 
 
 @dataclass
 class RegimeTuning:
-    """Best regime fit found, with the parameters that produced it."""
+    """Best regime fit found, with the parameters that produced it.
+
+    ``oos_regimes`` is the wide ``[Timestamp, {ticker}_Regime,
+    {ticker}_Regime_Prob]`` frame from the fixed-model out-of-sample nowcast
+    (empty when the request carried no ``oos_dates``).
+    """
 
     labels: dict[str, int]
     results: Mapping[str, regimes.RegimeResult]
@@ -308,6 +371,7 @@ class RegimeTuning:
     normalization_window: int
     hmm_lag: int
     mean_bic: float
+    oos_regimes: pl.DataFrame = field(default_factory=pl.DataFrame)
 
     def to_dict(self) -> dict[str, Any]:
         """Full JSON-serializable representation including per-asset decoded states."""
@@ -328,13 +392,56 @@ class RegimeTuning:
                 }
                 for ticker, result in self.results.items()
             },
+            "oos_regimes": _serialize_frame(self.oos_regimes),
         }
+
+    def regime_label_table(self) -> pl.DataFrame:
+        """``regime_label`` aspect: long ``[timestamp, ticker, regime_label]``.
+
+        Stacks every asset's full in-sample decoded path with the fixed-model
+        out-of-sample labels (when ``oos_dates`` were requested), so one table
+        carries both. Labels are the canonical 0 = calmest ordering, comparable
+        in and out of sample because the out-of-sample nowcast reuses the same
+        fitted model.
+        """
+        frames: list[pl.DataFrame] = []
+        for ticker, result in self.results.items():
+            frames.append(
+                result.states.select(
+                    pl.col(OHLCHeader.TIMESTAMP).alias("timestamp"),
+                    pl.lit(ticker).alias("ticker"),
+                    pl.col("Regime").alias("regime_label"),
+                )
+            )
+        if self.oos_regimes.width > 0:
+            for column in self.oos_regimes.columns:
+                if not column.endswith("_Regime"):
+                    continue
+                ticker = column.removesuffix("_Regime")
+                frames.append(
+                    self.oos_regimes.select(
+                        pl.col(OHLCHeader.TIMESTAMP).alias("timestamp"),
+                        pl.lit(ticker).alias("ticker"),
+                        pl.col(column).alias("regime_label"),
+                    ).drop_nulls()
+                )
+        if not frames:
+            return pl.DataFrame(
+                schema={
+                    "timestamp": pl.Datetime,
+                    "ticker": pl.Utf8,
+                    "regime_label": pl.Int64,
+                }
+            )
+        return pl.concat(frames, how="vertical_relaxed").sort(["ticker", "timestamp"])
 
     def save(self, path: Path) -> None:
         """Persist to *path*: scalar params + numpy model params in
         ``metadata.json``, per-asset state DataFrames as
         ``states_{ticker}.parquet``."""
         path.mkdir(parents=True, exist_ok=True)
+        if self.oos_regimes.width > 0:
+            self.oos_regimes.write_parquet(path / "oos_regimes.parquet")
         ticker_meta: dict[str, Any] = {}
         for ticker, result in self.results.items():
             result.states.write_parquet(path / f"states_{ticker}.parquet")
@@ -383,6 +490,8 @@ class RegimeTuning:
             )
             for ticker, data in meta["results"].items()
         }
+        oos_path = path / "oos_regimes.parquet"
+        oos_regimes = pl.read_parquet(oos_path) if oos_path.exists() else pl.DataFrame()
         return cls(
             labels=meta["labels"],
             results=ticker_results,
@@ -390,6 +499,7 @@ class RegimeTuning:
             normalization_window=meta["normalization_window"],
             hmm_lag=meta["hmm_lag"],
             mean_bic=meta["mean_bic"],
+            oos_regimes=oos_regimes,
         )
 
 
@@ -407,21 +517,34 @@ def optimize_regime(
     Residualization follows ``request.benchmark_ticker``: a market-model (OLS)
     fit against the benchmark when one is given, else rolling PCA over the
     basket (see :func:`regimes._residual_frames`).
+
+    When ``request.oos_dates`` are given, the panel is fetched through the last
+    of them; the sweep still fits **in-sample only** (the panel is sliced at
+    ``end_date``), and the winning model is then held fixed to nowcast the
+    out-of-sample regimes (:func:`regimes.predict_oos_regimes`), stored on the
+    result's ``oos_regimes``.
     """
+    horizon = max([request.end_date, *request.oos_dates])
     if panel is None:
         panel = _prepare_panel(
             request.tickers,
             request.start_date,
-            request.end_date,
+            horizon,
             benchmark_ticker=request.benchmark_ticker,
         )
+    # The sweep fits in-sample only; trim any out-of-sample tail the panel
+    # carries so the BIC and decoded path stop at end_date.
+    in_sample = panel.filter(
+        pl.col(OHLCHeader.TIMESTAMP).cast(pl.Date)
+        <= dt.date.fromisoformat(request.end_date[:10])
+    )
     best: RegimeTuning | None = None
     for window, lag in itertools.product(_REGIME_WINDOWS, _REGIME_LAGS):
         config = AnalysisConfig(
             tickers=list(request.tickers),
             start_date=request.start_date,
             end_date=request.end_date,
-            injected_panel=panel,
+            injected_panel=in_sample,
             benchmark_ticker=request.benchmark_ticker,
             residualization_window=window,
             normalization_window=window,
@@ -443,12 +566,30 @@ def optimize_regime(
             )
     if best is None:
         raise ValueError("No regime configuration fit any asset on this window.")
+    if request.oos_dates:
+        # Re-fit the winning configuration on the full panel; predict_oos_regimes
+        # holds the fit fixed and classifies each out-of-sample date causally.
+        oos_config = AnalysisConfig(
+            tickers=list(request.tickers),
+            start_date=request.start_date,
+            end_date=request.end_date,
+            injected_panel=panel,
+            benchmark_ticker=request.benchmark_ticker,
+            residualization_window=best.residualization_window,
+            normalization_window=best.normalization_window,
+            regime_hmm_lag=best.hmm_lag,
+            regime_auto_select_states=True,
+        )
+        best.oos_regimes = regimes.predict_oos_regimes(
+            oos_config, list(request.oos_dates)
+        )
     logger.info(
-        "regime: mean BIC %.1f (window=%d, lag=%d, assets=%d)",
+        "regime: mean BIC %.1f (window=%d, lag=%d, assets=%d, oos dates=%d)",
         best.mean_bic,
         best.residualization_window,
         best.hmm_lag,
         len(best.results),
+        len(request.oos_dates),
     )
     return best
 
@@ -581,6 +722,22 @@ class FamaFrenchTuning:
             },
             "oos_residuals": self.oos_residuals.to_dicts(),
         }
+
+    def ff_residuals_table(self) -> pl.DataFrame:
+        """``ff_residuals`` aspect: long ``[date, ticker, specification, residual,
+        p_value]``.
+
+        ``p_value`` is the two-sided tail probability of the standardized
+        out-of-sample residual; it is **local to each specification** (hence the
+        ``specification`` column) and must not be compared across them.
+        """
+        return self.oos_residuals.select(
+            pl.col("Date").alias("date"),
+            pl.col("Ticker").alias("ticker"),
+            pl.col("Specification").alias("specification"),
+            pl.col("Residual").alias("residual"),
+            pl.col("PValue").alias("p_value"),
+        ).sort(["specification", "date", "ticker"])
 
     def save(self, path: Path) -> None:
         """Persist to *path*: pydantic models in ``metadata.json``,
@@ -747,6 +904,27 @@ class RRGTuning:
             "relative_strength": _serialize_frame(self.relative_strength),
             "relative_momentum": _serialize_frame(self.relative_momentum),
         }
+
+    def coordinates_table(self) -> pl.DataFrame:
+        """``coordinates`` aspect: long ``[timestamp, ticker, relative_strength,
+        relative_momentum]`` -- one RRG point per (date, ticker).
+
+        The wide per-ticker RS-Ratio and momentum frames are melted to long form
+        and inner-joined, so a row exists only where both coordinates do.
+        """
+        strength = _unpivot_by_ticker(
+            self.relative_strength,
+            rrg._RELATIVE_STRENGTH_COLUMN_NAME,
+            "relative_strength",
+        )
+        momentum = _unpivot_by_ticker(
+            self.relative_momentum,
+            rrg._RELATIVE_MOMENTUM_COLUMN_NAME,
+            "relative_momentum",
+        )
+        return strength.join(momentum, on=["timestamp", "ticker"], how="inner").sort(
+            ["ticker", "timestamp"]
+        )
 
     def save(self, path: Path) -> None:
         """Persist to *path*: scalars in ``metadata.json``, DataFrames as

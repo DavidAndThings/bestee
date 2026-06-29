@@ -5,6 +5,8 @@ The *request* models are reused directly from ``bestee_compute.workflow.tuning``
 single source of truth. Only the API-specific response models live here.
 """
 
+from typing import Any
+
 from pydantic import BaseModel
 
 
@@ -41,6 +43,19 @@ class ResultMeta(BaseModel):
     result_id: str
     analysis_type: str
     created_at: str  # ISO UTC datetime string
+
+
+class ResultTable(BaseModel):
+    """One analysis-specific *aspect* of a result, rendered as a table.
+
+    ``columns`` gives the canonical column order; ``rows`` are the records
+    (temporal values serialized to ISO strings).
+    """
+
+    result_id: str
+    aspect: str
+    columns: list[str]
+    rows: list[dict[str, Any]]
 
 
 class SearchResults(BaseModel):

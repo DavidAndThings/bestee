@@ -16,6 +16,9 @@ validate against a single source of truth.
 | `POST` | `/tasks/fama-french`     | `FamaFrenchRequest`   | Enqueue an auto-tuned Fama-French fit.       |
 | `POST` | `/tasks/rrg`             | `RRGRequest`          | Enqueue an auto-tuned relative-rotation job. |
 | `GET`  | `/jobs/{task_id}`        | --                    | Poll a job's state, result, or error.        |
+| `GET`  | `/results`               | --                    | List stored tuning results, newest first.    |
+| `GET`  | `/results/{result_id}`   | --                    | Load a full stored tuning result.            |
+| `GET`  | `/results/{result_id}/{aspect}` | --             | One analysis-specific aspect, as a table.    |
 | `GET`  | `/search`                | --                    | Search SIC titles + company names (`?q=`).   |
 | `GET`  | `/sic`                   | --                    | List every SIC code and its industry title.  |
 | `GET`  | `/sic/{sic_code}/tickers`| --                    | Tickers classified under a SIC code.         |
@@ -24,6 +27,19 @@ validate against a single source of truth.
 A successful `POST` returns `202 Accepted` with a `TaskHandle` (`{"task_id": ...}`).
 Poll `GET /jobs/{task_id}` until `state` is `SUCCESS` (carries `result`) or
 `FAILURE` (carries `error`).
+
+### Result aspects
+
+`GET /results/{result_id}/{aspect}` returns a `ResultTable`
+(`{result_id, aspect, columns, rows}`) -- a focused, analysis-specific view of a
+stored result. The available aspect depends on the analysis that produced it:
+
+| Analysis | Aspect | Columns |
+| --- | --- | --- |
+| clustering | `cluster_label` | `ticker`, `cluster_label` |
+| rrg | `coordinates` | `timestamp`, `ticker`, `relative_strength`, `relative_momentum` |
+| regime | `regime_label` | `timestamp`, `ticker`, `regime_label` (in-sample path + any out-of-sample dates) |
+| fama_french | `ff_residuals` | `date`, `ticker`, `specification`, `residual`, `p_value` |
 
 ## Environment
 

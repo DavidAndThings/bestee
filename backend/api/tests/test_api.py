@@ -584,3 +584,195 @@ def test_get_result_loads_and_returns_clustering_result() -> None:
     assert data["result_id"] == "clustering_abc123def4"
     assert data["labels"] == {"AAA": 0, "BBB": 1}
     assert data["silhouette"] == pytest.approx(0.72)
+
+
+# ---------------------------------------------------------------------------
+# GET /results/{result_id}/{aspect_name}
+# ---------------------------------------------------------------------------
+
+
+def _mock_result_path() -> MagicMock:
+    """A Path whose result directory and metadata.json appear to exist."""
+    mock_path = MagicMock(spec=Path)
+    mock_path.__truediv__ = lambda self, other: mock_path
+    mock_path.exists.return_value = True
+    (mock_path / "metadata.json").exists.return_value = True
+    return mock_path
+
+
+def _get_aspect(result_id: str, aspect: str, loaders: dict) -> Any:
+    with (
+        patch("routers.results._get_results_dir", return_value=_mock_result_path()),
+        patch("routers.results._LOADERS", loaders),
+    ):
+        return client.get(f"/results/{result_id}/{aspect}")
+
+
+def test_aspect_cluster_label() -> None:
+    from bestee_compute.workflow.tuning import ClusteringTuning
+
+    fake = ClusteringTuning(
+        labels={"AAA": 0, "BBB": 1},
+        residualization_window=20,
+        normalization_window=20,
+        n_components=1,
+        similarity_metric="corr",
+        silhouette=0.7,
+        n_clusters=2,
+    )
+    response = _get_aspect(
+        "clustering_abc123def4", "cluster_label", {"clustering": lambda _: fake}
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["result_id"] == "clustering_abc123def4"
+    assert data["aspect"] == "cluster_label"
+    assert data["columns"] == ["ticker", "cluster_label"]
+    assert data["rows"] == [
+        {"ticker": "AAA", "cluster_label": 0},
+        {"ticker": "BBB", "cluster_label": 1},
+    ]
+
+
+def test_aspect_coordinates() -> None:
+    import datetime as dt
+
+    import polars as pl
+    from bestee_compute.workflow.tuning import RRGTuning
+
+    fake = RRGTuning(
+        normalization_window=20,
+        momentum_lookback=5,
+        smoothing_span=None,
+        signal_to_noise=1.0,
+        relative_strength=pl.DataFrame(
+            {"Timestamp": [dt.datetime(2024, 1, 2)], "AAA_rel_strength": [1.1]}
+        ),
+        relative_momentum=pl.DataFrame(
+            {"Timestamp": [dt.datetime(2024, 1, 2)], "AAA_rel_momentum": [0.5]}
+        ),
+    )
+    response = _get_aspect("rrg_abc123def4", "coordinates", {"rrg": lambda _: fake})
+    assert response.status_code == 200
+    data = response.json()
+    assert data["columns"] == [
+        "timestamp",
+        "ticker",
+        "relative_strength",
+        "relative_momentum",
+    ]
+    assert len(data["rows"]) == 1
+    row = data["rows"][0]
+    assert row["ticker"] == "AAA"
+    assert row["relative_strength"] == pytest.approx(1.1)
+    assert row["relative_momentum"] == pytest.approx(0.5)
+    assert row["timestamp"].startswith("2024-01-02")
+
+
+def test_aspect_regime_label() -> None:
+    import datetime as dt
+
+    import numpy as np
+    import polars as pl
+    from bestee_compute.workflow import regimes
+    from bestee_compute.workflow.tuning import RegimeTuning
+
+    states = pl.DataFrame(
+        {
+            "Timestamp": [dt.datetime(2024, 1, 1), dt.datetime(2024, 1, 2)],
+            "Regime": [0, 1],
+            "Regime_Prob_0": [0.5, 0.5],
+            "Regime_Prob_1": [0.5, 0.5],
+        }
+    )
+    result = regimes.RegimeResult(
+        ticker="AAA",
+        states=states,
+        transition_matrix=np.eye(2),
+        start_prob=np.array([0.5, 0.5]),
+        coef=np.zeros((2, 1, 2)),
+        covars=np.ones((2, 1)),
+        feature_names=["residual", "log_vol"],
+        n_states=2,
+        lag=1,
+        log_likelihood=-10.0,
+        n_params=5,
+    )
+    fake = RegimeTuning(
+        labels={"AAA": 1},
+        results={"AAA": result},
+        residualization_window=20,
+        normalization_window=20,
+        hmm_lag=1,
+        mean_bic=100.0,
+        oos_regimes=pl.DataFrame(
+            {
+                "Timestamp": [dt.datetime(2024, 2, 1)],
+                "AAA_Regime": [1],
+                "AAA_Regime_Prob": [0.8],
+            }
+        ),
+    )
+    response = _get_aspect(
+        "regime_abc123def4", "regime_label", {"regime": lambda _: fake}
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["columns"] == ["timestamp", "ticker", "regime_label"]
+    # Two in-sample labels plus the out-of-sample nowcast.
+    assert [row["regime_label"] for row in data["rows"]] == [0, 1, 1]
+
+
+def test_aspect_ff_residuals() -> None:
+    import datetime as dt
+
+    import polars as pl
+    from bestee_compute.workflow.tuning import FamaFrenchTuning
+
+    fake = FamaFrenchTuning(
+        factors_to_use=6,
+        specifications=[],
+        results={},
+        mean_adjusted_r_squared=0.5,
+        oos_residuals=pl.DataFrame(
+            {
+                "Date": [dt.date(2024, 1, 15)],
+                "Ticker": ["AAA"],
+                "Specification": ["FF6_2020-01-01_2023-12-31"],
+                "Residual": [0.01],
+                "ZScore": [1.0],
+                "PValue": [0.31],
+            }
+        ),
+    )
+    response = _get_aspect(
+        "fama_french_abc123def4", "ff_residuals", {"fama_french": lambda _: fake}
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["columns"] == [
+        "date",
+        "ticker",
+        "specification",
+        "residual",
+        "p_value",
+    ]
+    assert data["rows"][0]["p_value"] == pytest.approx(0.31)
+
+
+def test_aspect_unknown_returns_404() -> None:
+    from bestee_compute.workflow.tuning import ClusteringTuning
+
+    fake = ClusteringTuning(
+        labels={"AAA": 0},
+        residualization_window=20,
+        normalization_window=20,
+        n_components=1,
+        similarity_metric="corr",
+        silhouette=0.7,
+        n_clusters=1,
+    )
+    response = _get_aspect(
+        "clustering_abc123def4", "not_an_aspect", {"clustering": lambda _: fake}
+    )
+    assert response.status_code == 404

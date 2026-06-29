@@ -10,10 +10,11 @@ from bestee_compute.workflow.tuning import (
     FamaFrenchTuning,
     RegimeTuning,
     RRGTuning,
+    frame_to_table,
 )
 from fastapi import APIRouter, HTTPException
 
-from schemas import ResultMeta
+from schemas import ResultMeta, ResultTable
 
 router = APIRouter(prefix="/results", tags=["results"])
 
@@ -22,6 +23,14 @@ _LOADERS = {
     "fama_french": FamaFrenchTuning.load,
     "regime": RegimeTuning.load,
     "rrg": RRGTuning.load,
+}
+
+# Per-analysis aspects: the method on each tuning object that builds the table.
+_ASPECTS: dict[str, dict[str, str]] = {
+    "clustering": {"cluster_label": "cluster_label_table"},
+    "fama_french": {"ff_residuals": "ff_residuals_table"},
+    "regime": {"regime_label": "regime_label_table"},
+    "rrg": {"coordinates": "coordinates_table"},
 }
 
 
@@ -75,3 +84,46 @@ def get_result(result_id: str) -> dict[str, Any]:
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     return {"result_id": result_id, **tuning_obj.to_dict()}
+
+
+@router.get("/{result_id}/{aspect_name}", response_model=ResultTable)
+def get_result_aspect(result_id: str, aspect_name: str) -> ResultTable:
+    """Return one analysis-specific *aspect* of a stored result, as a table.
+
+    The available aspects depend on the analysis that produced the result --
+    e.g. ``cluster_label`` (clustering), ``coordinates`` (RRG), ``regime_label``
+    (regime), ``ff_residuals`` (Fama-French).
+    """
+    results_dir = _get_results_dir()
+    path = results_dir / result_id
+    if not path.exists() or not (path / "metadata.json").exists():
+        raise HTTPException(status_code=404, detail=f"Result {result_id!r} not found.")
+    analysis_type = result_id.rsplit("_", 1)[0]
+    loader = _LOADERS.get(analysis_type)
+    if loader is None:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Unknown analysis type {analysis_type!r}.",
+        )
+    method_name = _ASPECTS.get(analysis_type, {}).get(aspect_name)
+    if method_name is None:
+        available = sorted(_ASPECTS.get(analysis_type, {}))
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                f"Aspect {aspect_name!r} is not available for {analysis_type!r} "
+                f"results; available: {available}."
+            ),
+        )
+    try:
+        tuning_obj = loader(path)
+        frame = getattr(tuning_obj, method_name)()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    table = frame_to_table(frame)
+    return ResultTable(
+        result_id=result_id,
+        aspect=aspect_name,
+        columns=table["columns"],
+        rows=table["rows"],
+    )
