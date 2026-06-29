@@ -424,6 +424,10 @@ def get_grouped_daily_column(
             pl.from_epoch(pl.col(OHLCHeader.TIMESTAMP), time_unit="ms")
             .dt.replace_time_zone("UTC")
             .dt.truncate("1d")
+            # from_epoch yields microsecond precision regardless of the input
+            # unit; normalize to the declared millisecond dtype so this bulk
+            # path stays join-aligned with the per-ticker get_ohlc fetch.
+            .dt.cast_time_unit("ms")
             .alias(OHLCHeader.TIMESTAMP)
         )
         .select(OHLCHeader.TIMESTAMP, *value_columns)

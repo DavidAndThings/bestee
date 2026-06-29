@@ -9,7 +9,7 @@ their data through the shared ``AnalysisConfig``.
 
 import datetime as dt
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 import polars as pl
@@ -510,3 +510,26 @@ class TestSpectralClustering:
         assert len(set(labels.values())) == 2
         assert labels["A3"] == labels["A1"]  # illiquid folded into its factor block
         assert labels["B3"] == labels["B1"]
+
+
+class TestTimestampAlignment:
+    def test_grouped_daily_matches_get_ohlc_precision(self) -> None:
+        # Regression: pl.from_epoch yields microsecond precision regardless of
+        # the input unit, so the bulk path must normalize back to the declared
+        # millisecond dtype -- otherwise it can't inner-join the per-ticker
+        # get_ohlc fetch (e.g. a benchmark close merged in _prepare_panel).
+        from massive.rest.models import GroupedDailyAgg
+
+        bar = MagicMock(spec=GroupedDailyAgg)
+        bar.ticker = "AAA"
+        bar.timestamp = 1_731_628_800_000  # 2024-11-15 00:00 UTC, epoch ms
+        bar.close = 100.0
+        config = AnalysisConfig(
+            tickers=["AAA"], start_date="2024-11-15", end_date="2024-11-15"
+        )
+        with patch("bestee_compute.workflow.tools.get_client") as client:
+            client.return_value.get_grouped_daily_aggs.return_value = [bar]
+            frame = tools.get_grouped_daily_column(config, ["AAA"], CLOSE)
+        # Must match get_ohlc's declared Timestamp dtype so the two join.
+        assert frame.schema[TS] == pl.Datetime("ms", time_zone="UTC")
+        assert frame.height == 1
