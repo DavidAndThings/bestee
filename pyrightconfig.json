@@ -1,6 +1,6 @@
 {
   "typeCheckingMode": "off",
-  "extraPaths": ["compute/src", "chat/src"],
+  "extraPaths": ["compute/src"],
   "executionEnvironments": [
     {
       "root": "api",
@@ -9,10 +9,6 @@
     {
       "root": "queue",
       "extraPaths": ["compute/src", "queue/.venv/lib/python3.14/site-packages"],
-    },
-    {
-      "root": "chat",
-      "extraPaths": ["chat/src", "chat/.venv/lib/python3.14/site-packages"],
     },
     {
       "root": "compute",

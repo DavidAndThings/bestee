@@ -1,13 +1,13 @@
 # Top-level task runner for the bestee monorepo.
 #
-# compute/, chat/, queue/, and api/ are independent uv projects (each with its
+# compute/, queue/, and api/ are independent uv projects (each with its
 # own .venv and uv.lock); ui/ is a standalone npm/Vite app.  queue/ runs the
 # bestee-compute tuning optimizers as Celery jobs and api/ is the FastAPI
 # producer that enqueues them.  These targets just fan common commands out
 # across the Python packages so you don't have to cd into each.  The UI keeps
 # its own npm scripts (see ui/) and has dedicated `ui-*` targets.
 
-PY := compute chat queue api
+PY := compute queue api
 
 .PHONY: help sync test lint fmt typecheck check ui-install ui-dev ui-build ui-preview
 

@@ -29,13 +29,6 @@ repos:
         types: [python]
         files: ^compute/
         pass_filenames: false
-      - id: ty-chat
-        name: ty check (chat)
-        entry: bash -c 'cd chat && uvx ty check'
-        language: system
-        types: [python]
-        files: ^chat/
-        pass_filenames: false
       - id: ty-queue
         name: ty check (queue)
         entry: bash -c 'cd queue && uvx ty check'
