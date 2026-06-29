@@ -9,7 +9,7 @@
 
 PY := compute queue api
 
-.PHONY: help sync test lint fmt typecheck check ui-install ui-dev ui-build ui-preview
+.PHONY: help sync test lint fmt typecheck check ui-install ui-dev ui-build ui-preview api-dev queue-dev redis-dev dev
 
 help:  ## List available targets
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -44,3 +44,27 @@ ui-build:  ## type-check + build the UI
 
 ui-preview:  ## preview the production build of the UI
 	cd ui && npm run preview
+
+# ---- Local dev orchestration -------------------------------------------------
+# These start long-running servers. The API and worker both need Redis reachable
+# via DO_REDIS_CONNECTION (managed, or redis://localhost:6379 with a local server
+# -- see `redis-dev`). For the UI to call the API instead of its built-in mock,
+# set VITE_API_BASE_URL=http://localhost:8000 in ui/.env.local.
+
+api-dev:  ## Run the API (uvicorn, autoreload) on :8000
+	cd api && uv run uvicorn main:app --reload --port 8000
+
+queue-dev:  ## Run the Celery worker that processes submitted jobs
+	cd queue && uv run celery -A main worker --loglevel=info
+
+redis-dev:  ## Run a throwaway local Redis on :6379 (needs Docker)
+	docker run --rm -p 6379:6379 redis:7-alpine
+
+dev:  ## Run API + worker + UI together (Ctrl-C stops all). Needs Redis.
+	@echo "Starting API :8000, Celery worker, and UI :5173. Ctrl-C stops all."
+	@echo "Prereqs: Redis (DO_REDIS_CONNECTION) and, in ui/.env.local, VITE_API_BASE_URL=http://localhost:8000"
+	@trap 'kill 0' INT TERM EXIT; \
+	(cd api && uv run uvicorn main:app --reload --port 8000) & \
+	(cd queue && uv run celery -A main worker --loglevel=info) & \
+	(cd ui && npm run dev) & \
+	wait
