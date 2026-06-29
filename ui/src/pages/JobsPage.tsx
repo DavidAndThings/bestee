@@ -1,9 +1,11 @@
+import { useCallback, useEffect, useState } from "react";
 import { useAuth } from "@clerk/react";
 import { Link } from "react-router-dom";
 import { getSchema } from "../config/schemas";
 import type { Job, JobStatus } from "../lib/types";
 import { relativeTime } from "../lib/format";
 import { useJobs } from "../hooks/useJobs";
+import { jobsApi } from "../services/jobsApi";
 import refreshIcon from "../assets/icons/refresh.svg";
 import cancelIcon from "../assets/icons/cancel.svg";
 import infoIcon from "../assets/icons/info.svg";
@@ -18,7 +20,15 @@ const STATUS_BADGE: Record<JobStatus, { label: string; className: string }> = {
 
 /** View table / Detail / Redo / Cancel action buttons.  Shared by the desktop
  *  table row and the mobile card so we don't drift the per-status logic. */
-function JobActions({ job }: { job: Job }) {
+function JobActions({
+  job,
+  onResubmit,
+  resubmittingId,
+}: {
+  job: Job;
+  onResubmit: (job: Job) => void;
+  resubmittingId: string | null;
+}) {
   const aspect = getSchema(job.schemaId)?.aspect;
   // The result table only exists once the job completes; the result id is known
   // from submit time, so the link is ready the moment the status flips.
@@ -26,6 +36,8 @@ function JobActions({ job }: { job: Job }) {
     job.status === "completed" && job.resultId && aspect
       ? `/results/${job.resultId}/${aspect}`
       : null;
+  const resubmitting = resubmittingId === job.id;
+  const busy = resubmittingId !== null;
   return (
     <div className="flex flex-nowrap items-center justify-end gap-2">
       {tableHref && (
@@ -49,8 +61,14 @@ function JobActions({ job }: { job: Job }) {
           type="button"
           className="btn btn-ghost btn-circle btn-sm"
           aria-label="Redo"
+          onClick={() => onResubmit(job)}
+          disabled={busy}
         >
-          <img src={redoIcon} alt="" className="size-6" />
+          {resubmitting ? (
+            <span className="loading loading-spinner loading-sm" />
+          ) : (
+            <img src={redoIcon} alt="" className="size-6" />
+          )}
         </button>
       </div>
       {(job.status === "queued" || job.status === "running") && (
@@ -71,6 +89,43 @@ function JobActions({ job }: { job: Job }) {
 function JobsPage() {
   const { userId } = useAuth();
   const { jobs, loading, refresh } = useJobs(userId);
+  const [resubmittingId, setResubmittingId] = useState<string | null>(null);
+  const [feedback, setFeedback] = useState<{
+    kind: "success" | "error";
+    message: string;
+  } | null>(null);
+
+  // Resubmit re-POSTs the job's stored schema + payload as a new run. The result
+  // id is a deterministic hash of the request, so a redo overwrites the same
+  // result slot rather than creating a divergent one.
+  const handleResubmit = useCallback(
+    (job: Job) => {
+      if (!userId || resubmittingId) return;
+      setResubmittingId(job.id);
+      setFeedback(null);
+      jobsApi
+        .submitJob(userId, { schemaId: job.schemaId, payload: job.payload })
+        .then(() => {
+          setFeedback({ kind: "success", message: "Job resubmitted." });
+          refresh();
+        })
+        .catch(() => {
+          setFeedback({
+            kind: "error",
+            message: "Couldn't resubmit the job. Please try again.",
+          });
+        })
+        .finally(() => setResubmittingId(null));
+    },
+    [userId, resubmittingId, refresh],
+  );
+
+  // Auto-dismiss the resubmit toast after a few seconds.
+  useEffect(() => {
+    if (!feedback) return;
+    const timer = setTimeout(() => setFeedback(null), 4000);
+    return () => clearTimeout(timer);
+  }, [feedback]);
 
   return (
     <div className="p-4 sm:p-8">
@@ -136,7 +191,11 @@ function JobsPage() {
                       </span>
                     </div>
                     <div className="mt-3 flex justify-end">
-                      <JobActions job={job} />
+                      <JobActions
+                        job={job}
+                        onResubmit={handleResubmit}
+                        resubmittingId={resubmittingId}
+                      />
                     </div>
                   </li>
                 );
@@ -173,7 +232,11 @@ function JobsPage() {
                           {relativeTime(job.createdAt)}
                         </td>
                         <td className="text-right">
-                          <JobActions job={job} />
+                          <JobActions
+                            job={job}
+                            onResubmit={handleResubmit}
+                            resubmittingId={resubmittingId}
+                          />
                         </td>
                       </tr>
                     );
@@ -182,6 +245,18 @@ function JobsPage() {
               </table>
             </div>
           </>
+        )}
+
+        {feedback && (
+          <div className="toast toast-end">
+            <div
+              className={`alert ${
+                feedback.kind === "success" ? "alert-success" : "alert-error"
+              }`}
+            >
+              <span>{feedback.message}</span>
+            </div>
+          </div>
         )}
       </div>
     </div>
