@@ -53,6 +53,13 @@ export type Schema = {
    * checks. Returns a map of field key -> error message (empty when valid).
    */
   validate?: (payload: Record<string, unknown>) => Record<string, string>;
+  /**
+   * Optional mapping from the validated form payload to the request body the
+   * API expects, for schemas whose form fields don't map 1:1 to the backend
+   * model (e.g. Fama-French collects a single window + OOS date but the model
+   * takes `intervals` + `oos_dates`). Defaults to the payload unchanged.
+   */
+  toRequestBody?: (payload: Record<string, unknown>) => Record<string, unknown>;
 };
 
 const RELATIVE_ROTATION_GRAPH_SCHEMA: Schema = {
@@ -306,16 +313,32 @@ const FAMA_FRENCH_SCHEMA: Schema = {
       type: "date",
       description: "End of the estimation window.",
     },
+    oos_date: {
+      type: "date",
+      description:
+        "Out-of-sample date for the residuals; must fall after the end date.",
+    },
   },
   validate: (payload) => {
     const errors: Record<string, string> = {};
     const start = payload.start_date;
     const end = payload.end_date;
+    const oos = payload.oos_date;
     if (typeof start === "string" && typeof end === "string" && start > end) {
       errors.end_date = "The end date must be on or after the start date.";
     }
+    if (typeof end === "string" && typeof oos === "string" && oos <= end) {
+      errors.oos_date = "The out-of-sample date must be after the end date.";
+    }
     return errors;
   },
+  // The model takes one or more estimation `intervals` and `oos_dates`; the
+  // form collects a single window + OOS date, wrapped here into those lists.
+  toRequestBody: (payload) => ({
+    tickers: payload.tickers,
+    intervals: [{ start_date: payload.start_date, end_date: payload.end_date }],
+    oos_dates: [payload.oos_date],
+  }),
 };
 
 /**

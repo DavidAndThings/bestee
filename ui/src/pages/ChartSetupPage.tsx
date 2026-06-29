@@ -175,9 +175,13 @@ function ChartSetupPage() {
 
     setSubmitState({ status: "submitting" });
     try {
+      // Some schemas reshape the form payload into the API's request body.
+      const requestBody = schema.toRequestBody
+        ? schema.toRequestBody(result.payload)
+        : result.payload;
       const response = await jobsApi.submitJob(userId, {
         schemaId: schema.id,
-        payload: result.payload,
+        payload: requestBody,
       });
       setSubmitState({ status: "success", jobId: response.requestId });
     } catch {

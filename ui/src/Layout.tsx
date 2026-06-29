@@ -1,5 +1,6 @@
 import { Show } from "@clerk/react";
 import { Link, Outlet, useLocation } from "react-router-dom";
+import AuthBridge from "./components/AuthBridge";
 import ErrorBoundary from "./components/ErrorBoundary";
 import UserMenu from "./components/UserMenu";
 import openSign from "./assets/icons/open-sign.svg";
@@ -10,6 +11,7 @@ function Layout() {
   const location = useLocation();
   return (
     <div className="flex h-dvh flex-col">
+      <AuthBridge />
       <div className="navbar bg-base-100 shadow-sm px-0 shrink-0">
         <div className="mx-auto flex w-full max-w-7xl flex-wrap items-center justify-between gap-4 px-8">
           <Link

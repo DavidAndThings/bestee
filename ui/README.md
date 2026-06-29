@@ -1,6 +1,26 @@
-# React + TypeScript + Vite
+# bestee UI
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+React + Vite + TypeScript + daisyUI front-end, authenticated with Clerk.
+
+## Configuration
+
+Copy [`.env.example`](.env.example) to `.env.local` and set:
+
+| Variable | Required | Purpose |
+| --- | --- | --- |
+| `VITE_CLERK_PUBLISHABLE_KEY` | Yes | Clerk publishable key. |
+| `VITE_API_BASE_URL` | No | Base URL of the bestee API (e.g. `/api` same-origin, or `http://localhost:8000`). **Unset = use the in-browser mock backend**, so the UI runs standalone without a server. |
+
+The data layer lives behind a single integration point (`src/services/jobsApi.ts`),
+which selects the live HTTP client (`httpBackend.ts`) when `VITE_API_BASE_URL`
+is set and the localStorage mock (`mockBackend.ts`) otherwise. Requests carry the
+Clerk session token via the auth bridge (`src/services/auth.ts`, registered by
+`src/components/AuthBridge.tsx`). The API must allow this origin in its
+`CORS_ALLOW_ORIGINS` (or be served same-origin behind a proxy).
+
+## Vite template notes
+
+This project started from the React + Vite template (HMR + ESLint).
 
 Currently, two official plugins are available:
 
