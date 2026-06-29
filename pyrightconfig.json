@@ -1,4 +1,5 @@
 {
+  "typeCheckingMode": "off",
   "extraPaths": ["compute/src", "chat/src"],
   "executionEnvironments": [
     {
