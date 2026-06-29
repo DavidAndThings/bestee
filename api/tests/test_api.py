@@ -349,6 +349,41 @@ def test_list_results_returns_empty_when_dir_absent() -> None:
     assert response.json() == []
 
 
+# ---------------------------------------------------------------------------
+# GET /search
+# ---------------------------------------------------------------------------
+
+
+def test_search_ranks_prefix_matches_first() -> None:
+    terms = [
+        "SERVICES-PREPACKAGED SOFTWARE",
+        "Software AG",
+        "Microsoft Corp",
+        "Apple Inc",
+    ]
+    with patch("routers.ticker.get_all_search_terms", return_value=terms):
+        response = client.get("/search", params={"q": "software"})
+    assert response.status_code == 200
+    data = response.json()
+    assert data["query"] == "software"
+    # "Software AG" (prefix) ranks ahead of the substring match.
+    assert data["results"] == ["Software AG", "SERVICES-PREPACKAGED SOFTWARE"]
+    assert data["count"] == 2
+
+
+def test_search_respects_limit() -> None:
+    terms = [f"Bank of {i:02d}" for i in range(50)]
+    with patch("routers.ticker.get_all_search_terms", return_value=terms):
+        response = client.get("/search", params={"q": "bank", "limit": 5})
+    assert response.status_code == 200
+    assert len(response.json()["results"]) == 5
+
+
+def test_search_requires_query() -> None:
+    response = client.get("/search")  # q is required
+    assert response.status_code == 422
+
+
 def test_get_result_returns_404_for_missing_result() -> None:
     with patch("routers.results._get_results_dir", return_value=Path("/no/such/dir")):
         response = client.get("/results/clustering_abc123def4")

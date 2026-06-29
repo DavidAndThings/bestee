@@ -41,3 +41,11 @@ class ResultMeta(BaseModel):
     result_id: str
     analysis_type: str
     created_at: str  # ISO UTC datetime string
+
+
+class SearchResults(BaseModel):
+    """Search terms matching a query, ranked with prefix matches first."""
+
+    query: str
+    count: int
+    results: list[str]
