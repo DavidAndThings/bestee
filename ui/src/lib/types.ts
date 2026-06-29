@@ -1,5 +1,11 @@
 export type JobStatus = "queued" | "running" | "completed" | "failed";
 
+/** A SIC industry classification code and its title. */
+export type SicCode = {
+  sicCode: string;
+  industryTitle: string;
+};
+
 /** A submitted chart job, uniquely identified by a uuid. */
 export type Job = {
   id: string;

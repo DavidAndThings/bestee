@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 import Card from "./components/Card";
 import { SCHEMA_REGISTRY, type ButtonVariant } from "./config/schemas";
 import pocketConsole from "./assets/gifs/pocket-console.gif";
+import paperMoney from "./assets/gifs/paper-money.gif";
 
 type HomeCard = {
   id: string;
@@ -21,6 +22,7 @@ const FAVOURITES_KEY = "bestee:favourites";
 /** Every card id, in declared order (schemas first, then Job Status). */
 const ALL_CARD_IDS = [
   ...SCHEMA_REGISTRY.map((schema) => schema.id),
+  "sic-codes",
   "job-status",
 ];
 
@@ -95,6 +97,17 @@ function App() {
       actionLabel: isSignedIn ? "Configure" : "Sign in to start",
       onAction: () => navigateWithAuth(`/charts/${schema.id}`),
     })),
+    {
+      id: "sic-codes",
+      title: "SIC Code Directory",
+      description:
+        "Browse SIC industry codes and the tickers classified under each.",
+      badge: "Reference",
+      imageUrl: paperMoney,
+      buttonVariant: "btn-warning",
+      actionLabel: isSignedIn ? "Browse" : "Sign in to browse",
+      onAction: () => navigateWithAuth("/sic"),
+    },
     {
       id: "job-status",
       title: "Job Status",

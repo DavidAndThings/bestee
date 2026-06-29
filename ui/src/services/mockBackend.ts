@@ -1,4 +1,4 @@
-import type { Job } from "../lib/types";
+import type { Job, SicCode } from "../lib/types";
 
 /**
  * A stand-in for a real backend. Jobs are persisted to localStorage, namespaced
@@ -230,6 +230,55 @@ const SEARCH_CATALOG: string[] = [
   "RETAIL-CATALOG & MAIL-ORDER HOUSES",
   "SERVICES-BUSINESS SERVICES, NEC",
 ];
+
+/** A representative slice of the SEC SIC code list for the mock browser. */
+const SIC_CODES: SicCode[] = [
+  { sicCode: "1311", industryTitle: "CRUDE PETROLEUM & NATURAL GAS" },
+  { sicCode: "2080", industryTitle: "BEVERAGES" },
+  { sicCode: "2834", industryTitle: "PHARMACEUTICAL PREPARATIONS" },
+  {
+    sicCode: "2836",
+    industryTitle: "BIOLOGICAL PRODUCTS (NO DIAGNOSTIC SUBSTANCES)",
+  },
+  { sicCode: "3571", industryTitle: "ELECTRONIC COMPUTERS" },
+  { sicCode: "3674", industryTitle: "SEMICONDUCTORS & RELATED DEVICES" },
+  { sicCode: "3711", industryTitle: "MOTOR VEHICLES & PASSENGER CAR BODIES" },
+  { sicCode: "3721", industryTitle: "AIRCRAFT" },
+  { sicCode: "3826", industryTitle: "LABORATORY ANALYTICAL INSTRUMENTS" },
+  { sicCode: "5812", industryTitle: "RETAIL-EATING PLACES" },
+  { sicCode: "5961", industryTitle: "RETAIL-CATALOG & MAIL-ORDER HOUSES" },
+  { sicCode: "6021", industryTitle: "NATIONAL COMMERCIAL BANKS" },
+  { sicCode: "6798", industryTitle: "REAL ESTATE INVESTMENT TRUSTS" },
+  { sicCode: "7372", industryTitle: "SERVICES-PREPACKAGED SOFTWARE" },
+  {
+    sicCode: "7389",
+    industryTitle: "SERVICES-COMPUTER PROGRAMMING, DATA PROCESSING, ETC.",
+  },
+];
+
+/** Mock ticker membership per SIC code; unmapped codes return none. */
+const SIC_TICKERS: Record<string, string[]> = {
+  "1311": ["XOM", "CVX", "COP", "OXY"],
+  "2080": ["KO", "PEP", "MNST"],
+  "2834": ["PFE", "MRK", "LLY", "ABBV", "BMY"],
+  "3571": ["AAPL", "DELL", "HPQ"],
+  "3674": ["NVDA", "AVGO", "AMD", "TXN", "MU", "QCOM"],
+  "3711": ["TSLA", "GM", "F"],
+  "3721": ["BA"],
+  "5812": ["MCD", "SBUX", "CMG", "YUM"],
+  "6021": ["JPM", "BAC", "WFC", "C"],
+  "7372": ["MSFT", "ORCL", "ADBE", "CRM", "NOW"],
+};
+
+/** The full SIC code list (mocked). */
+export function listSicCodes(): Promise<SicCode[]> {
+  return delay(SIC_CODES.slice(), 200);
+}
+
+/** Ticker symbols classified under *sicCode* (mocked). */
+export function tickersForSic(sicCode: string): Promise<string[]> {
+  return delay((SIC_TICKERS[sicCode] ?? []).slice(), 200);
+}
 
 /**
  * Search the catalog for *query* (case-insensitive substring), ranking prefix

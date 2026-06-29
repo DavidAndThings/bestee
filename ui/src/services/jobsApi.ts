@@ -1,7 +1,7 @@
 import * as httpBackend from "./httpBackend";
 import * as mockBackend from "./mockBackend";
 import type { SubmitJobInput, SubmitJobResult } from "./mockBackend";
-import type { Job } from "../lib/types";
+import type { Job, SicCode } from "../lib/types";
 
 export type { SubmitJobInput, SubmitJobResult } from "./mockBackend";
 
@@ -10,6 +10,8 @@ type JobsBackend = {
   listJobs(userId: string): Promise<Job[]>;
   submitJob(userId: string, input: SubmitJobInput): Promise<SubmitJobResult>;
   search(query: string, limit?: number): Promise<string[]>;
+  listSicCodes(): Promise<SicCode[]>;
+  tickersForSic(sicCode: string): Promise<string[]>;
 };
 
 // Use the real API when VITE_API_BASE_URL is configured; otherwise fall back to
@@ -32,5 +34,13 @@ export const jobsApi = {
   /** Search the term catalog (company names + SIC industry titles). */
   search(query: string, limit?: number): Promise<string[]> {
     return backend.search(query, limit);
+  },
+  /** List every SIC industry code and its title. */
+  listSicCodes(): Promise<SicCode[]> {
+    return backend.listSicCodes();
+  },
+  /** List the ticker symbols classified under a SIC code. */
+  tickersForSic(sicCode: string): Promise<string[]> {
+    return backend.tickersForSic(sicCode);
   },
 };

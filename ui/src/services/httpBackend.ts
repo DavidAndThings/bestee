@@ -1,4 +1,4 @@
-import type { Job, JobStatus } from "../lib/types";
+import type { Job, JobStatus, SicCode } from "../lib/types";
 import type { SubmitJobInput, SubmitJobResult } from "./mockBackend";
 import { getAuthToken } from "./auth";
 
@@ -151,6 +151,39 @@ export async function listJobs(userId: string): Promise<Job[]> {
       };
     }),
   );
+}
+
+/** One SIC row as returned by `GET /sic` (`SicCode`). */
+type ApiSicCode = { sic_code: string; industry_title: string };
+
+export async function listSicCodes(): Promise<SicCode[]> {
+  const response = await fetch(`${API_BASE_URL}/sic`, {
+    headers: await authHeaders(),
+  });
+  if (!response.ok) {
+    console.error(
+      `[bestee] /sic failed: ${response.status} ${response.statusText}`,
+    );
+    throw new Error(`Failed to load SIC codes (${response.status})`);
+  }
+  const data = (await response.json()) as { codes?: ApiSicCode[] };
+  return (data.codes ?? []).map((code) => ({
+    sicCode: code.sic_code,
+    industryTitle: code.industry_title,
+  }));
+}
+
+export async function tickersForSic(sicCode: string): Promise<string[]> {
+  const url = `${API_BASE_URL}/sic/${encodeURIComponent(sicCode)}/tickers`;
+  const response = await fetch(url, { headers: await authHeaders() });
+  if (!response.ok) {
+    console.error(
+      `[bestee] ${url} failed: ${response.status} ${response.statusText}`,
+    );
+    throw new Error(`Failed to load tickers (${response.status})`);
+  }
+  const data = (await response.json()) as { tickers?: string[] };
+  return Array.isArray(data.tickers) ? data.tickers : [];
 }
 
 export async function search(query: string, limit = 20): Promise<string[]> {
