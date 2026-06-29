@@ -212,3 +212,59 @@ def test_industry_title_treats_name_as_literal(_mock_df: MagicMock) -> None:
         "equipment & software", index={"BBB": "5045"}
     )
     assert result == ["BBB"]
+
+
+# ── resolve_terms_to_tickers / resolve_term_to_ticker ──────────────────
+
+_CATALOG: tuple[frozenset[str], dict[str, tuple[str, ...]]] = (
+    frozenset({"AAPL", "GOOG", "GOOGL", "MSFT"}),
+    {
+        "apple inc.": ("AAPL",),
+        "alphabet inc.": ("GOOG", "GOOGL"),
+        "microsoft corp": ("MSFT",),
+    },
+)
+
+
+def test_resolve_keeps_known_ticker_symbol() -> None:
+    # A raw symbol (any case) is kept, upper-cased.
+    assert tk.resolve_terms_to_tickers(["aapl"], catalog=_CATALOG) == ["AAPL"]
+
+
+def test_resolve_company_name_maps_to_share_classes() -> None:
+    # A name shared by two listings resolves to both, case-insensitively.
+    assert tk.resolve_terms_to_tickers(["Alphabet Inc."], catalog=_CATALOG) == [
+        "GOOG",
+        "GOOGL",
+    ]
+
+
+@patch(_SIC_DF_PATCH, return_value=_SIC_TITLES)
+def test_resolve_industry_title_expands_to_codes(_mock_df: MagicMock) -> None:
+    index = {"AAA": "7372", "BBB": "5045", "CCC": "6021", "DDD": "5734"}
+    # No symbol/name match, so the term falls through to SIC expansion.
+    result = tk.resolve_terms_to_tickers(
+        ["SERVICES-PREPACKAGED SOFTWARE"], catalog=_CATALOG, index=index
+    )
+    assert result == ["AAA"]
+
+
+@patch(_SIC_DF_PATCH, return_value=_SIC_TITLES)
+def test_resolve_mixed_terms_dedup_preserves_order(_mock_df: MagicMock) -> None:
+    index = {"AAPL": "3571", "AAA": "7372"}
+    result = tk.resolve_terms_to_tickers(
+        ["AAPL", "Apple Inc.", "SERVICES-PREPACKAGED SOFTWARE"],
+        catalog=_CATALOG,
+        index=index,
+    )
+    # AAPL resolves once (symbol then name both map to it), then the SIC code.
+    assert result == ["AAPL", "AAA"]
+
+
+def test_resolve_unknown_term_is_dropped() -> None:
+    assert tk.resolve_terms_to_tickers(["not a real thing"], catalog=_CATALOG) == []
+
+
+def test_resolve_term_to_single_ticker() -> None:
+    assert tk.resolve_term_to_ticker("Apple Inc.", catalog=_CATALOG) == "AAPL"
+    assert tk.resolve_term_to_ticker("nope", catalog=_CATALOG) is None

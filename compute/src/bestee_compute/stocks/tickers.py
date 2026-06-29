@@ -4,8 +4,9 @@ import importlib.resources
 import json
 import logging
 import os
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
+from functools import cache
 from pathlib import Path
 from typing import cast
 
@@ -621,3 +622,109 @@ def related_tickers_sharing_sic(
     if use_cache:
         _remember_sic_codes(discovered)
     return matches
+
+
+# ── Resolving search terms to tickers ─────────────────────────────────
+
+_Catalog = tuple[frozenset[str], Mapping[str, tuple[str, ...]]]
+
+
+@cache
+def _ticker_name_catalog() -> _Catalog:
+    """Build ``(ticker symbols, company-name -> tickers)`` from the universe.
+
+    The name map folds case and groups share classes that report the same name
+    (e.g. Alphabet's ``GOOG`` and ``GOOGL``).  Cached after the first
+    (network-bound) call; clear with ``_ticker_name_catalog.cache_clear()``.
+    """
+    df = get_all_tickers_df()
+    symbols = df.get_column(cols.TICKER).to_list()
+    names = df.get_column(cols.NAME).to_list()
+    name_to_tickers: dict[str, list[str]] = {}
+    for symbol, name in zip(symbols, names):
+        if symbol and name:
+            name_to_tickers.setdefault(name.casefold(), []).append(symbol)
+    ticker_set = frozenset(s for s in symbols if s)
+    return ticker_set, {name: tuple(t) for name, t in name_to_tickers.items()}
+
+
+def _resolve_one(
+    term: str,
+    ticker_set: frozenset[str],
+    name_to_tickers: Mapping[str, tuple[str, ...]],
+    index: Mapping[str, str] | None,
+    api_key: str | None,
+) -> list[str]:
+    """Resolve a single term to the ticker(s) it denotes (possibly empty).
+
+    A term is, in priority order, an exact ticker symbol, an exact company
+    name, or a SIC industry title (expanded to every ticker in those codes).
+    """
+    cleaned = term.strip()
+    if not cleaned:
+        return []
+    symbol = cleaned.upper()
+    if symbol in ticker_set:
+        return [symbol]
+    by_name = name_to_tickers.get(cleaned.casefold())
+    if by_name:
+        return list(by_name)
+    return get_tickers_by_sic_industry_title(cleaned, index=index, api_key=api_key)
+
+
+def resolve_terms_to_tickers(
+    terms: Sequence[str],
+    *,
+    catalog: _Catalog | None = None,
+    index: Mapping[str, str] | None = None,
+    api_key: str | None = None,
+) -> list[str]:
+    """Resolve a mixed list of search terms into a de-duplicated ticker list.
+
+    Each term -- as produced by the ``/search`` catalog -- is one of a ticker
+    symbol, a company name, or a SIC industry title.  Symbols are kept as-is,
+    company names map to their listing(s), and an industry title expands to
+    every ticker in the matching SIC code(s).  Order follows first appearance;
+    duplicates are dropped.
+
+    Args:
+        terms: The user-selected terms to resolve.
+        catalog: A ``(ticker symbols, company-name -> tickers)`` pair to match
+            against.  Defaults to the bundled universe (network on first use).
+        index: A ``{ticker: sic_code}`` map for industry-title expansion.
+            Defaults to the bundled cache.
+        api_key: Massive API key, used only when *catalog*/*index* are built.
+
+    Returns:
+        The resolved ticker symbols, in order of first appearance.
+    """
+    ticker_set, name_to_tickers = (
+        catalog if catalog is not None else _ticker_name_catalog()
+    )
+    resolved: list[str] = []
+    seen: set[str] = set()
+    for term in terms:
+        for symbol in _resolve_one(term, ticker_set, name_to_tickers, index, api_key):
+            if symbol not in seen:
+                seen.add(symbol)
+                resolved.append(symbol)
+    return resolved
+
+
+def resolve_term_to_ticker(
+    term: str,
+    *,
+    catalog: _Catalog | None = None,
+    index: Mapping[str, str] | None = None,
+    api_key: str | None = None,
+) -> str | None:
+    """Resolve a single term to one ticker (the first match), or ``None``.
+
+    Suited to single-security inputs such as an RRG benchmark, where an
+    industry title -- which would otherwise expand to many tickers -- collapses
+    to its first symbol.
+    """
+    resolved = resolve_terms_to_tickers(
+        [term], catalog=catalog, index=index, api_key=api_key
+    )
+    return resolved[0] if resolved else None
