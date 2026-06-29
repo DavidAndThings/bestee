@@ -19,23 +19,16 @@ from schemas import SearchResults
 router = APIRouter(prefix="/search", tags=["search"])
 
 
-def get_all_sic_industry_titles() -> Sequence[str]:
-    """Every SIC industry title (e.g. ``"SERVICES-PREPACKAGED SOFTWARE"``)."""
-    return get_sic_codes_df().get_column("Industry Title").to_list()
-
-
-def get_all_company_names() -> Sequence[str]:
-    """Every company name in the Massive ticker universe."""
-    return get_all_tickers_df().get_column("Name").to_list()
-
-
 @cache
 def get_all_search_terms() -> Sequence[str]:
     """The searchable catalog: SIC industry titles plus every company name.
 
     Cached after the first (network-bound) call.
     """
-    return [*get_all_sic_industry_titles(), *get_all_company_names()]
+
+    sic_industry_titles = get_sic_codes_df().get_column("Industry Title").to_list()
+    company_names = get_all_tickers_df().get_column("Name").to_list()
+    return sic_industry_titles + company_names
 
 
 def _search(query: str, terms: Sequence[str], limit: int) -> list[str]:

@@ -240,7 +240,7 @@ def get_sic_codes() -> GT:
     df = get_sic_codes_df()
 
     return (
-        GT(get_sic_codes_df())
+        GT(df)
         .tab_header(
             title="SIC Codes",
             subtitle=f"{df.height} Standard Industrial Classification codes",
