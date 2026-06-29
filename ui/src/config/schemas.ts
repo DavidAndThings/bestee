@@ -24,6 +24,13 @@ export type FieldDef = {
   optional?: boolean;
   /** Default pre-fill value (mirrors the model field's default). */
   default?: string | number;
+  /**
+   * Render with the security search autocomplete: the user picks terms (ticker
+   * symbols, company names, or SIC industry titles) that the backend resolves
+   * to ticker symbols. Use on an `array` field for multi-select, or a `string`
+   * field for a single security (e.g. an RRG benchmark).
+   */
+  ticker?: boolean;
 };
 
 export type Schema = {
@@ -61,6 +68,7 @@ const RELATIVE_ROTATION_GRAPH_SCHEMA: Schema = {
       items: {
         type: "string",
       },
+      ticker: true,
       description: "The securities to plot on the rotation graph.",
     },
     start_date: {
@@ -80,6 +88,7 @@ const RELATIVE_ROTATION_GRAPH_SCHEMA: Schema = {
     },
     benchmark_ticker: {
       type: "string",
+      ticker: true,
       description:
         "Benchmark security to rotate against. Required when reference_type is 'ticker'.",
       optional: true,
@@ -194,6 +203,7 @@ const SPECTRAL_CLUSTERING_SCHEMA: Schema = {
       items: {
         type: "string",
       },
+      ticker: true,
       description: "The securities to cluster.",
     },
     start_date: {
@@ -248,6 +258,7 @@ const REGIME_DETECTION_SCHEMA: Schema = {
       items: {
         type: "string",
       },
+      ticker: true,
       description: "The securities to detect regimes for.",
     },
     start_date: {
@@ -284,6 +295,7 @@ const FAMA_FRENCH_SCHEMA: Schema = {
       items: {
         type: "string",
       },
+      ticker: true,
       description: "The securities to fit factor models for.",
     },
     start_date: {

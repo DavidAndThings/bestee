@@ -5,8 +5,11 @@ import { getSchema, type FieldDef, type FieldType } from "../config/schemas";
 import { humanizeKey } from "../lib/format";
 import { jobsApi } from "../services/jobsApi";
 import DateField from "../components/DateField";
+import TickerSearchField from "../components/TickerSearchField";
 
-type FormValues = Record<string, string>;
+// Ticker fields hold a `string[]` of selected terms; every other field a string.
+type FormValue = string | string[];
+type FormValues = Record<string, FormValue>;
 type FormErrors = Record<string, string>;
 
 type SubmitState =
@@ -26,7 +29,12 @@ const noAutofill = {
 };
 
 function initialValues(parameters: Record<string, FieldDef>): FormValues {
-  return Object.fromEntries(Object.keys(parameters).map((key) => [key, ""]));
+  return Object.fromEntries(
+    Object.entries(parameters).map(([key, def]) => [
+      key,
+      def.type === "array" ? [] : "",
+    ]),
+  );
 }
 
 function parseArray(raw: string): string[] {
@@ -45,19 +53,25 @@ function inputType(type: FieldType): string {
 function coerceValue(
   key: string,
   def: FieldDef,
-  raw: string,
+  raw: FormValue,
 ): { value?: unknown; error?: string } {
-  const trimmed = raw.trim();
-
   if (def.type === "array") {
-    const items = parseArray(raw);
+    // Ticker fields supply a string[]; a non-ticker array would be free text.
+    const items = Array.isArray(raw) ? raw : parseArray(raw);
     if (items.length === 0) {
       return { error: `${humanizeKey(key)} needs at least one value.` };
     }
     return { value: items };
   }
 
+  const trimmed = (typeof raw === "string" ? raw : "").trim();
+
   if (!trimmed) {
+    // Optional fields (e.g. an RRG benchmark under a 'mean' reference) may be
+    // left blank — omit them from the payload rather than erroring.
+    if (def.optional) {
+      return { value: undefined };
+    }
     return { error: `${humanizeKey(key)} is required.` };
   }
 
@@ -95,10 +109,11 @@ function buildPayload(
   const errors: FormErrors = {};
 
   for (const [key, def] of Object.entries(parameters)) {
-    const result = coerceValue(key, def, values[key] ?? "");
+    const raw = values[key] ?? (def.type === "array" ? [] : "");
+    const result = coerceValue(key, def, raw);
     if (result.error) {
       errors[key] = result.error;
-    } else {
+    } else if (result.value !== undefined) {
       payload[key] = result.value;
     }
   }
@@ -127,7 +142,7 @@ function ChartSetupPage() {
     return <Navigate to="/" replace />;
   }
 
-  const updateValue = (key: string, value: string) => {
+  const updateValue = (key: string, value: FormValue) => {
     setValues((prev) => ({ ...prev, [key]: value }));
     // Only touch error state when there's actually an error to clear,
     // avoiding a second re-render on every keystroke.
@@ -201,6 +216,9 @@ function ChartSetupPage() {
               // First field receives focus on mount so keyboard users
               // can start typing immediately.
               const autoFocus = index === 0;
+              const current = values[key];
+              const stringValue = typeof current === "string" ? current : "";
+              const arrayValue = Array.isArray(current) ? current : [];
               return (
                 <div key={key} className="form-control w-full">
                   <label
@@ -218,7 +236,7 @@ function ChartSetupPage() {
                       className={`select select-bordered w-full ${
                         error ? "select-error" : ""
                       }`}
-                      value={values[key] ?? ""}
+                      value={stringValue}
                       onChange={(event) => updateValue(key, event.target.value)}
                     >
                       <option value="" disabled>
@@ -230,6 +248,23 @@ function ChartSetupPage() {
                         </option>
                       ))}
                     </select>
+                  ) : def.ticker && def.type === "array" ? (
+                    <TickerSearchField
+                      id={id}
+                      values={arrayValue}
+                      onChange={(next) => updateValue(key, next)}
+                      invalid={!!error}
+                      autoFocus={autoFocus}
+                    />
+                  ) : def.ticker ? (
+                    <TickerSearchField
+                      id={id}
+                      single
+                      values={stringValue ? [stringValue] : []}
+                      onChange={(next) => updateValue(key, next[0] ?? "")}
+                      invalid={!!error}
+                      autoFocus={autoFocus}
+                    />
                   ) : def.type === "array" ? (
                     <textarea
                       id={id}
@@ -238,14 +273,14 @@ function ChartSetupPage() {
                       className={`textarea textarea-bordered min-h-28 w-full ${
                         error ? "textarea-error" : ""
                       }`}
-                      value={values[key] ?? ""}
+                      value={stringValue}
                       placeholder="AAPL, MSFT, GOOG"
                       onChange={(event) => updateValue(key, event.target.value)}
                     />
                   ) : def.type === "date" ? (
                     <DateField
                       id={id}
-                      value={values[key] ?? ""}
+                      value={stringValue}
                       onChange={(next) => updateValue(key, next)}
                       invalid={!!error}
                       autoFocus={autoFocus}
@@ -260,7 +295,7 @@ function ChartSetupPage() {
                       className={`input input-bordered w-full ${
                         error ? "input-error" : ""
                       }`}
-                      value={values[key] ?? ""}
+                      value={stringValue}
                       onChange={(event) => updateValue(key, event.target.value)}
                     />
                   )}
@@ -269,6 +304,7 @@ function ChartSetupPage() {
                     <span className="text-base-content/60 text-sm leading-relaxed">
                       {def.description}
                       {def.type === "array" &&
+                        !def.ticker &&
                         " Separate values with commas or new lines."}
                     </span>
                     {error && (
