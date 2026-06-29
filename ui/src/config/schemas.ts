@@ -221,6 +221,13 @@ const SPECTRAL_CLUSTERING_SCHEMA: Schema = {
       type: "date",
       description: "End of the analysis window.",
     },
+    benchmark_ticker: {
+      type: "string",
+      ticker: true,
+      description:
+        "Optional benchmark security. When set, each name is residualized against it with a rolling market-model (OLS) regression; left blank, residualization falls back to PCA over the basket itself.",
+      optional: true,
+    },
     min_num_clusters: {
       type: "integer",
       description:

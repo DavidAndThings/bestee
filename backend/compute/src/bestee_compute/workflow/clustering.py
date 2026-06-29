@@ -30,12 +30,14 @@ logger = logging.getLogger(__name__)
 def run_spectral_clustering(config: AnalysisConfig) -> Mapping[str, int]:
     """Cluster securities by residual co-movement via spectral clustering.
 
-    Residualizes ``tickers`` (rolling PCA or OLS per ``residualization_method``),
-    turns the residual correlations into a non-negative affinity, and partitions
-    that graph with spectral clustering -- which handles the elongated,
-    non-convex structure correlation graphs often have. The cluster count is
-    auto-selected in ``[clustering_min_num_clusters, clustering_max_num_clusters]``
-    by the mean silhouette.
+    Residualizes ``tickers`` -- against ``benchmark_ticker`` via the rolling
+    market-model (OLS) regression when one is set, else rolling PCA over the
+    basket itself -- turns the residual correlations into a non-negative
+    affinity, and partitions that graph with spectral clustering, which handles
+    the elongated, non-convex structure correlation graphs often have. The
+    cluster count is auto-selected in
+    ``[clustering_min_num_clusters, clustering_max_num_clusters]`` by the mean
+    silhouette.
 
     Only the **liquid** tickers (median dollar volume >= ``min_dollar_volume``)
     are clustered; illiquid micro-caps have near-pure-noise residuals that would
@@ -181,13 +183,12 @@ def _get_residuals(
     config: AnalysisConfig,
     ticker_class: TickerClass = "all",
 ) -> pl.DataFrame:
-    """Normalized residuals for *ticker_class* per ``residualization_method``."""
-    match config.residualization_method:
-        case "pca":
-            return get_normalized_pca_residuals(config, ticker_class)
-        case "ols":
-            return get_normalized_ols_residuals(config, ticker_class)
-        case _:
-            raise ValueError(
-                f"Unknown residualization method: {config.residualization_method}"
-            )
+    """Normalized residuals for *ticker_class*.
+
+    With a ``benchmark_ticker`` set, residualize each name against it via the
+    rolling market-model (OLS) regression; otherwise use rolling PCA over the
+    clustered basket itself, so a benchmark is optional.
+    """
+    if config.benchmark_ticker is not None:
+        return get_normalized_ols_residuals(config, ticker_class)
+    return get_normalized_pca_residuals(config, ticker_class)

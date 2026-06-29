@@ -127,12 +127,16 @@ class ClusteringRequest(BaseModel):
     """User inputs for auto-tuned spectral clustering.
 
     The universe and window, plus the inclusive cluster-count bounds within
-    which the best ``k`` is selected by silhouette.
+    which the best ``k`` is selected by silhouette. With ``benchmark_ticker``
+    set, names are residualized against it via the rolling market-model (OLS)
+    regression; left unset, residualization falls back to rolling PCA over the
+    basket itself, so a benchmark is optional.
     """
 
     tickers: Sequence[str] = Field(min_length=2)
     start_date: str
     end_date: str
+    benchmark_ticker: str | None = None
     min_num_clusters: int = Field(default=2, ge=2)
     max_num_clusters: int = Field(default=50, ge=2)
 
@@ -188,15 +192,29 @@ def optimize_clustering(
 
     The cluster *count* is already chosen inside
     :func:`clustering.run_spectral_clustering` (best ``k`` by silhouette); this
-    tunes what feeds it -- the rolling PCA window, the z-score window, the number
-    of removed components, and the correlation-to-affinity mapping.
+    tunes what feeds it -- the rolling residualization window, the z-score
+    window, the correlation-to-affinity mapping, and (PCA only) the number of
+    removed components.
+
+    Residualization follows ``request.benchmark_ticker``: a market-model (OLS)
+    fit against the benchmark when one is given, else rolling PCA over the
+    basket (see :func:`clustering._get_residuals`). The removed-component sweep
+    is PCA-specific, so it collapses to a single trial under OLS.
     """
     if panel is None:
-        panel = _prepare_panel(request.tickers, request.start_date, request.end_date)
+        panel = _prepare_panel(
+            request.tickers,
+            request.start_date,
+            request.end_date,
+            benchmark_ticker=request.benchmark_ticker,
+        )
     n_tickers = len(request.tickers)
+    # n_components only feeds PCA; under an OLS benchmark it is inert, so one
+    # value suffices and the sweep doesn't recompute identical residuals.
+    n_component_grid = (1,) if request.benchmark_ticker else _N_COMPONENTS
     best: ClusteringTuning | None = None
     for window, norm, n_comp, metric in itertools.product(
-        _RESIDUAL_WINDOWS, _NORMALIZATION_WINDOWS, _N_COMPONENTS, _SIMILARITY_METRICS
+        _RESIDUAL_WINDOWS, _NORMALIZATION_WINDOWS, n_component_grid, _SIMILARITY_METRICS
     ):
         if n_comp > min(window, n_tickers):
             continue
@@ -205,7 +223,7 @@ def optimize_clustering(
             start_date=request.start_date,
             end_date=request.end_date,
             injected_panel=panel,
-            residualization_method="pca",
+            benchmark_ticker=request.benchmark_ticker,
             residualization_window=window,
             normalization_window=norm,
             n_components=n_comp,

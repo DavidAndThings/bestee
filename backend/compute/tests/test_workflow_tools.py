@@ -86,6 +86,36 @@ def _factor_panel(
     return pl.DataFrame(data)
 
 
+def _benchmark_factor_panel(
+    groups: dict[int, list[str]],
+    benchmark: str,
+    *,
+    n_days: int = 220,
+    seed: int = 7,
+) -> pl.DataFrame:
+    """Like :func:`_factor_panel`, but exposes the market factor as *benchmark*.
+
+    The benchmark tracks the shared market factor, so a rolling market-model
+    (OLS) regression against it strips the market and leaves each group's own
+    factor -- the same block structure rolling PCA recovers, but the benchmark
+    is the explicit market proxy rather than an estimated principal component.
+    """
+    rng = np.random.default_rng(seed)
+    market = rng.normal(0.0, 0.012, n_days)
+    data: dict[str, object] = {TS: _weekdays(n_days)}
+    benchmark_price = 100.0 * np.exp(np.cumsum(market))
+    data[f"{benchmark}_{CLOSE}"] = benchmark_price
+    data[f"{benchmark}_{VOLUME}"] = 1e8 / benchmark_price
+    for members in groups.values():
+        factor = rng.normal(0.0, 0.011, n_days)
+        for ticker in members:
+            returns = market + factor + rng.normal(0.0, 0.0015, n_days)
+            price = 100.0 * np.exp(np.cumsum(returns))
+            data[f"{ticker}_{CLOSE}"] = price
+            data[f"{ticker}_{VOLUME}"] = 1e8 / price
+    return pl.DataFrame(data)
+
+
 def _source(tickers: list[str], panel: pl.DataFrame, **kwargs: Any) -> AnalysisConfig:
     params: dict[str, Any] = {
         "tickers": tickers,
@@ -394,6 +424,50 @@ class TestSpectralClustering:
         config = _source(
             tickers,
             panel,
+            min_dollar_volume=0.0,
+            ohlc_column=CLOSE,
+            residualization_window=40,
+            normalization_window=40,
+            clustering_min_num_clusters=2,
+            clustering_max_num_clusters=2,
+        )
+        with patch(_OHLC_PATCH) as ohlc, patch(_BULK_PATCH) as bulk:
+            labels = clustering.run_spectral_clustering(config)
+        ohlc.assert_not_called()
+        bulk.assert_not_called()
+        assert set(labels) == set(tickers)
+        assert labels["A1"] == labels["A2"] == labels["A3"]
+        assert labels["B1"] == labels["B2"] == labels["B3"]
+        assert labels["A1"] != labels["B1"]
+
+    def test_benchmark_selects_ols_residuals(self) -> None:
+        # A benchmark switches the residualization to the market-model (OLS) fit;
+        # without one it stays on rolling PCA over the basket.
+        groups = {0: ["A1", "A2"], 1: ["B1", "B2"]}
+        tickers = [t for members in groups.values() for t in members]
+        panel = _benchmark_factor_panel(groups, "MKT", n_days=120)
+        shared = dict(
+            min_dollar_volume=0.0,
+            ohlc_column=CLOSE,
+            residualization_window=20,
+            normalization_window=20,
+        )
+        with_benchmark = _source(tickers, panel, benchmark_ticker="MKT", **shared)
+        without_benchmark = _source(tickers, panel, **shared)
+        with patch(_OHLC_PATCH), patch(_BULK_PATCH):
+            ols = clustering._get_residuals(with_benchmark, "all")
+            pca = clustering._get_residuals(without_benchmark, "all")
+        assert ols.equals(tools.get_normalized_ols_residuals(with_benchmark, "all"))
+        assert pca.equals(tools.get_normalized_pca_residuals(without_benchmark, "all"))
+
+    def test_recovers_factor_blocks_with_benchmark(self) -> None:
+        groups = {0: ["A1", "A2", "A3"], 1: ["B1", "B2", "B3"]}
+        tickers = [t for members in groups.values() for t in members]
+        panel = _benchmark_factor_panel(groups, "MKT", n_days=220)
+        config = _source(
+            tickers,
+            panel,
+            benchmark_ticker="MKT",
             min_dollar_volume=0.0,
             ohlc_column=CLOSE,
             residualization_window=40,
