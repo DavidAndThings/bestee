@@ -6,7 +6,9 @@ result. The app is a thin producer -- it dispatches tasks by name and never
 imports the analytics stack.
 """
 
+import logging
 import os
+import threading
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -34,10 +36,22 @@ _CORS_ALLOW_ORIGINS = [
 ]
 
 
+def _warm_search_catalog() -> None:
+    """Build the /search catalog so the first request isn't a cold ~5s fetch."""
+    try:
+        ticker.get_all_search_terms()
+        logging.getLogger("api").info("search catalog warmed")
+    except Exception:
+        logging.getLogger("api").warning("search catalog warm failed", exc_info=True)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Persist logs to ``LOG_DIR`` (stdout + file) for the server's lifetime."""
     configure_logging("api")
+    # Warm the (network-bound) search catalog off the request path so the first
+    # autocomplete query is fast instead of blocking ~5s on a cold cache.
+    threading.Thread(target=_warm_search_catalog, daemon=True).start()
     yield
 
 
