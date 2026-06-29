@@ -14,11 +14,13 @@ has ~unit rolling variance by construction and its trailing volatility carries
 almost no regime signal -- the raw residual's does.
 """
 
+import datetime as dt
 import logging
 from collections.abc import Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 from functools import reduce
-from typing import Literal
+from typing import Any, Literal
 
 import numpy as np
 import polars as pl
@@ -342,6 +344,107 @@ def run_regime_analysis(
     return {ticker: r for ticker, r in results.items() if r is not None}
 
 
+def predict_oos_regimes(
+    config: AnalysisConfig,
+    oos_dates: Sequence[str | dt.date | dt.datetime],
+    ticker_class: TickerClass = "all",
+) -> pl.DataFrame:
+    """Causal out-of-sample regime nowcast with a fixed (no-refit) AR-HMM.
+
+    Fits one AR-HMM per asset on the **in-sample** window (bars at or before
+    ``config.end_date``), then -- holding every fitted model *fixed* -- decodes
+    the filtered regime posterior at each date in *oos_dates*. Keeping the model
+    fixed is what makes this genuinely out-of-sample: just extending the window
+    and re-running :func:`run_regime_analysis` would let the new bars influence
+    the EM fit (lookahead) and could permute the state labels between runs
+    (label switching). Holding the fit fixed keeps the canonical labels (0 =
+    calmest) comparable in and out of sample.
+
+    The features are trailing/causal (rolling residualization and normalization,
+    an EWM log-volatility), so the in-sample feature values are unchanged by the
+    presence of later bars; the posterior at an OOS date is the forward-filtered
+    state probability over the contiguous observation path up to that date
+    (``predict_proba(prefix)[-1]``, whose smoothing weight is one at the last
+    bar). Standardization uses **in-sample** statistics only, so no future
+    information leaks in (this deliberately differs from
+    :func:`run_regime_analysis`, whose full-sample z-score is a mild lookahead).
+
+    Returns a wide frame with one row per requested date: ``Timestamp`` (the
+    actual bar at or before the date) plus ``{ticker}_Regime`` (canonical label)
+    and ``{ticker}_Regime_Prob`` (that regime's filtered posterior) for every
+    asset whose model fit. A date before all available history -- or an asset
+    with too little in-sample data to fit -- yields nulls.
+    """
+    if not oos_dates:
+        raise ValueError("predict_oos_regimes needs at least one out-of-sample date")
+    targets = [_as_date(d) for d in oos_dates]
+    # Build features once over the full horizon so the OOS bars exist (the fetch
+    # path is bounded by end_date); the trailing features keep the in-sample
+    # values identical to a window that had stopped at end_date.
+    horizon = max(_as_date(config.end_date), *targets)
+    extended = replace(config, end_date=horizon)
+    frame = _feature_frame(extended, ticker_class)
+    timestamp = frame[OHLCHeader.TIMESTAMP]
+    stamps = timestamp.to_numpy()
+    in_sample = stamps <= np.datetime64(_as_date(config.end_date))
+    indices = [_resolve_oos_index(stamps, target) for target in targets]
+    tickers = get_tickers(extended, ticker_class)
+
+    def predict_one(ticker: str) -> tuple[str, list[int | None], list[float | None]]:
+        names = [_feature_column(ticker, f) for f in config.regime_features]
+        observations = frame.select(names).to_numpy()
+        in_obs = observations[in_sample]
+        mean = in_obs.mean(axis=0)
+        std = in_obs.std(axis=0)
+        std = np.where(std == 0.0, 1.0, std)
+        model = _select_model(config, ticker, (in_obs - mean) / std)
+        if model is None:
+            return ticker, [], []
+        order = model.volatility_order()
+        standardized = (observations - mean) / std
+        labels: list[int | None] = []
+        confidence: list[float | None] = []
+        for index in indices:
+            if index is None or index < model.lag:
+                labels.append(None)
+                confidence.append(None)
+                continue
+            posterior = model.predict_proba(standardized[: index + 1])[-1][order]
+            labels.append(int(np.argmax(posterior)))
+            confidence.append(float(posterior.max()))
+        return ticker, labels, confidence
+
+    with ThreadPoolExecutor(max_workers=config.max_workers) as pool:
+        fitted = list(pool.map(predict_one, tickers))
+
+    columns: dict[str, list[Any]] = {
+        OHLCHeader.TIMESTAMP: [
+            timestamp[index] if index is not None else None for index in indices
+        ]
+    }
+    for ticker, labels, confidence in fitted:
+        if not labels:
+            continue
+        columns[f"{ticker}_{_REGIME_COLUMN}"] = labels
+        columns[f"{ticker}_{_REGIME_PROB_COLUMN}"] = confidence
+    return pl.DataFrame(columns)
+
+
+def _as_date(value: str | dt.date | dt.datetime) -> dt.date:
+    """Coerce an ISO string, date, or datetime bound to a plain date."""
+    if isinstance(value, dt.datetime):
+        return value.date()
+    if isinstance(value, dt.date):
+        return value
+    return dt.date.fromisoformat(str(value)[:10])
+
+
+def _resolve_oos_index(timestamps: np.ndarray, oos_date: dt.date) -> int | None:
+    """Index of the last bar at or before *oos_date* (``None`` if before all)."""
+    count = int((timestamps <= np.datetime64(oos_date)).sum())
+    return count - 1 if count > 0 else None
+
+
 def _feature_frame(
     config: AnalysisConfig,
     ticker_class: TickerClass,
@@ -400,12 +503,10 @@ def _feature_column(ticker: str, feature: RegimeFeature) -> str:
     return f"{ticker}{_FEATURE_SEPARATOR}{feature}"
 
 
-def _fit_asset(
-    config: AnalysisConfig,
-    ticker: str,
-    observations: np.ndarray,
-    timestamps: pl.Series,
-) -> RegimeResult | None:
+def _select_model(
+    config: AnalysisConfig, ticker: str, observations: np.ndarray
+) -> _GaussianARHMM | None:
+    """Fit the AR-HMM, choosing the state count by BIC within the param budget."""
     dimensions = observations.shape[1]
     usable = observations.shape[0] - config.regime_hmm_lag
     candidates = (
@@ -434,6 +535,17 @@ def _fit_asset(
             best, best_bic = model, bic
     if best is None:
         logger.warning("Skipping %s: no AR-HMM converged within the budget", ticker)
+    return best
+
+
+def _fit_asset(
+    config: AnalysisConfig,
+    ticker: str,
+    observations: np.ndarray,
+    timestamps: pl.Series,
+) -> RegimeResult | None:
+    best = _select_model(config, ticker, observations)
+    if best is None:
         return None
     return _build_result(config, ticker, best, observations, timestamps)
 

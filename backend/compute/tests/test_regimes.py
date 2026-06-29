@@ -8,6 +8,7 @@ guard, and the wide ``regime_frame`` join.
 """
 
 import datetime as dt
+from dataclasses import replace
 from typing import Any
 
 import numpy as np
@@ -215,3 +216,64 @@ class TestRegimeAnalysisRunner:
         tickers = ["AAA"]
         with pytest.raises(ValueError, match="at least one feature"):
             _config(_regime_close_panel(tickers), tickers, regime_features=[])
+
+
+class TestOutOfSampleRegimePrediction:
+    def test_predicts_oos_regimes_with_fixed_model(self) -> None:
+        tickers = ["AAA", "BBB", "CCC"]
+        config = _config(
+            _regime_close_panel(tickers, n_days=600),
+            tickers,
+            end_date="2024-09-30",
+        )
+        oos = ["2024-10-15", "2024-11-15", "2024-12-16"]  # weekdays after end_date
+        frame = regimes.predict_oos_regimes(config, oos)
+
+        assert frame.height == 3
+        # One bar per requested date, all on or after the in-sample cutoff.
+        assert (frame[TS].to_numpy() >= np.datetime64("2024-09-30")).all()
+        for ticker in tickers:
+            labels = frame[f"{ticker}_Regime"].to_numpy()
+            probs = frame[f"{ticker}_Regime_Prob"].to_numpy()
+            assert set(np.unique(labels)) <= {0, 1}
+            assert np.all((probs >= 0.0) & (probs <= 1.0))
+
+    def test_oos_prediction_matches_fixed_model_filter(self) -> None:
+        # The reported posterior must be the fixed model's *causal* filter over
+        # the prefix ending at the OOS bar -- not a smoothed (look-ahead) value.
+        tickers = ["AAA", "BBB"]
+        config = _config(
+            _regime_close_panel(tickers, n_days=600, seed=11),
+            tickers,
+            end_date="2024-09-30",
+        )
+        oos = ["2024-11-15"]
+        frame = regimes.predict_oos_regimes(config, oos)
+
+        extended = replace(config, end_date="2024-11-15")
+        feature_frame = regimes._feature_frame(extended, "all")
+        stamps = feature_frame[TS].to_numpy()
+        in_sample = stamps <= np.datetime64(dt.date(2024, 9, 30))
+        index = regimes._resolve_oos_index(stamps, dt.date(2024, 11, 15))
+        assert index is not None
+        for ticker in tickers:
+            names = [regimes._feature_column(ticker, f) for f in config.regime_features]
+            observations = feature_frame.select(names).to_numpy()
+            in_obs = observations[in_sample]
+            mean = in_obs.mean(axis=0)
+            std = np.where(in_obs.std(axis=0) == 0.0, 1.0, in_obs.std(axis=0))
+            model = regimes._select_model(config, ticker, (in_obs - mean) / std)
+            assert model is not None
+            order = model.volatility_order()
+            standardized = (observations - mean) / std
+            posterior = model.predict_proba(standardized[: index + 1])[-1][order]
+            assert frame[f"{ticker}_Regime"][0] == int(np.argmax(posterior))
+            assert frame[f"{ticker}_Regime_Prob"][0] == pytest.approx(
+                float(posterior.max())
+            )
+
+    def test_requires_oos_dates(self) -> None:
+        tickers = ["AAA"]
+        config = _config(_regime_close_panel(tickers), tickers)
+        with pytest.raises(ValueError, match="out-of-sample date"):
+            regimes.predict_oos_regimes(config, [])
