@@ -1,7 +1,7 @@
 import * as httpBackend from "./httpBackend";
 import * as mockBackend from "./mockBackend";
 import type { SubmitJobInput, SubmitJobResult } from "./mockBackend";
-import type { Job, SicCode, SicTicker } from "../lib/types";
+import type { Job, ResultTable, SicCode, SicTicker } from "../lib/types";
 
 export type { SubmitJobInput, SubmitJobResult } from "./mockBackend";
 
@@ -9,6 +9,7 @@ export type { SubmitJobInput, SubmitJobResult } from "./mockBackend";
 type JobsBackend = {
   listJobs(userId: string): Promise<Job[]>;
   submitJob(userId: string, input: SubmitJobInput): Promise<SubmitJobResult>;
+  getResultAspect(resultId: string, aspect: string): Promise<ResultTable>;
   search(query: string, limit?: number): Promise<string[]>;
   listSicCodes(): Promise<SicCode[]>;
   tickersForSic(sicCode: string): Promise<SicTicker[]>;
@@ -30,6 +31,10 @@ export const jobsApi = {
   },
   submitJob(userId: string, input: SubmitJobInput): Promise<SubmitJobResult> {
     return backend.submitJob(userId, input);
+  },
+  /** Fetch one analysis-specific result aspect as a table. */
+  getResultAspect(resultId: string, aspect: string): Promise<ResultTable> {
+    return backend.getResultAspect(resultId, aspect);
   },
   /** Search the term catalog (company names + SIC industry titles). */
   search(query: string, limit?: number): Promise<string[]> {

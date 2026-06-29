@@ -1,4 +1,10 @@
-import type { Job, JobStatus, SicCode, SicTicker } from "../lib/types";
+import type {
+  Job,
+  JobStatus,
+  ResultTable,
+  SicCode,
+  SicTicker,
+} from "../lib/types";
 import type { SubmitJobInput, SubmitJobResult } from "./mockBackend";
 import { getAuthToken } from "./auth";
 
@@ -32,6 +38,8 @@ const REMOTE_JOBS_PREFIX = "bestee:remote-jobs:";
 
 type StoredJob = {
   taskId: string;
+  /** Deterministic result id returned by the API at submit time. */
+  resultId?: string;
   schemaId: string;
   payload: Record<string, unknown>;
   createdAt: number;
@@ -103,17 +111,26 @@ export async function submitJob(
   if (!response.ok) {
     throw new Error(`Submit failed (${response.status})`);
   }
-  const data = (await response.json()) as { task_id: string };
+  const data = (await response.json()) as {
+    task_id: string;
+    result_id: string;
+  };
   const now = Date.now();
   const jobs = readIndex(userId);
   jobs.push({
     taskId: data.task_id,
+    resultId: data.result_id,
     schemaId: input.schemaId,
     payload: input.payload,
     createdAt: now,
   });
   writeIndex(userId, jobs);
-  return { ok: true, requestId: data.task_id, receivedAt: now };
+  return {
+    ok: true,
+    requestId: data.task_id,
+    resultId: data.result_id,
+    receivedAt: now,
+  };
 }
 
 export async function listJobs(userId: string): Promise<Job[]> {
@@ -146,11 +163,42 @@ export async function listJobs(userId: string): Promise<Job[]> {
         schemaId: record.schemaId,
         status,
         payload: record.payload,
+        resultId: record.resultId,
         createdAt: record.createdAt,
         updatedAt,
       };
     }),
   );
+}
+
+/** One result aspect as returned by `GET /results/{id}/{aspect}` (`ResultTable`). */
+type ApiResultTable = {
+  result_id: string;
+  aspect: string;
+  columns: string[];
+  rows: Record<string, unknown>[];
+};
+
+export async function getResultAspect(
+  resultId: string,
+  aspect: string,
+): Promise<ResultTable> {
+  const url = `${API_BASE_URL}/results/${encodeURIComponent(
+    resultId,
+  )}/${encodeURIComponent(aspect)}`;
+  const response = await fetch(url, { headers: await authHeaders() });
+  if (!response.ok) {
+    // 404 typically means the job hasn't finished writing its result yet.
+    const detail = response.status === 404 ? "not ready" : "failed";
+    throw new Error(`Result table ${detail} (${response.status})`);
+  }
+  const data = (await response.json()) as ApiResultTable;
+  return {
+    resultId: data.result_id,
+    aspect: data.aspect,
+    columns: data.columns,
+    rows: data.rows,
+  };
 }
 
 /** One SIC row as returned by `GET /sic` (`SicCode`). */

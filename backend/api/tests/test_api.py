@@ -6,6 +6,7 @@ the right task name and payload are dispatched, and polling reads a mocked
 """
 
 import json
+import re
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -105,7 +106,11 @@ def test_submit_enqueues_task(path: str, task_name: str, body: dict) -> None:
     with patch("celery_client.celery_app.send_task", return_value=sent) as send:
         response = client.post(path, json=body)
     assert response.status_code == 202
-    assert response.json() == {"task_id": "task-123"}
+    body_json = response.json()
+    assert body_json["task_id"] == "task-123"
+    # The result id is a deterministic hash of the resolved request (identity
+    # resolution here), known at submit time before the job runs.
+    assert re.fullmatch(r"[a-z_]+_[0-9a-f]{16}", body_json["result_id"])
     assert send.call_args.args[0] == task_name
     assert send.call_args.kwargs["args"][0]["tickers"] == body["tickers"]
 

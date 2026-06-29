@@ -20,6 +20,20 @@ export type Job = {
   schemaId: string;
   status: JobStatus;
   payload: Record<string, unknown>;
+  /**
+   * The deterministic, request-derived id under which the result is stored.
+   * Known at submit time (returned by the API), so the `/results/{resultId}/
+   * {aspect}` links can be built before the job finishes.
+   */
+  resultId?: string;
   createdAt: number;
   updatedAt: number;
+};
+
+/** One analysis-specific result aspect, as returned by `GET /results/{id}/{aspect}`. */
+export type ResultTable = {
+  resultId: string;
+  aspect: string;
+  columns: string[];
+  rows: Record<string, unknown>[];
 };

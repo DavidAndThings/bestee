@@ -16,11 +16,23 @@ const STATUS_BADGE: Record<JobStatus, { label: string; className: string }> = {
   failed: { label: "Failed", className: "badge-error" },
 };
 
-/** Detail / Redo / Cancel action buttons.  Shared by the desktop table
- *  row and the mobile card so we don't drift the per-status logic. */
+/** View table / Detail / Redo / Cancel action buttons.  Shared by the desktop
+ *  table row and the mobile card so we don't drift the per-status logic. */
 function JobActions({ job }: { job: Job }) {
+  const aspect = getSchema(job.schemaId)?.aspect;
+  // The result table only exists once the job completes; the result id is known
+  // from submit time, so the link is ready the moment the status flips.
+  const tableHref =
+    job.status === "completed" && job.resultId && aspect
+      ? `/results/${job.resultId}/${aspect}`
+      : null;
   return (
     <div className="flex flex-nowrap items-center justify-end gap-2">
+      {tableHref && (
+        <Link to={tableHref} className="btn btn-outline btn-xs">
+          View table
+        </Link>
+      )}
       {job.status !== "queued" && (
         <div className="tooltip tooltip-left" data-tip="Details">
           <button
@@ -100,8 +112,7 @@ function JobsPage() {
             <ul className="space-y-3 md:hidden">
               {jobs.map((job) => {
                 const status = STATUS_BADGE[job.status];
-                const toolName =
-                  getSchema(job.schemaId)?.name ?? job.schemaId;
+                const toolName = getSchema(job.schemaId)?.name ?? job.schemaId;
                 return (
                   <li
                     key={job.id}

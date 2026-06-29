@@ -1,4 +1,4 @@
-import type { Job, SicCode, SicTicker } from "../lib/types";
+import type { Job, ResultTable, SicCode, SicTicker } from "../lib/types";
 
 /**
  * A stand-in for a real backend. Jobs are persisted to localStorage, namespaced
@@ -32,6 +32,21 @@ function writeJobs(userId: string, jobs: Job[]): void {
   localStorage.setItem(jobsKey(userId), JSON.stringify(jobs));
 }
 
+/** schemaId -> result-id prefix the backend uses (matches the api `_LOADERS`). */
+const RESULT_PREFIX: Record<string, string> = {
+  "relative-rotation-graph": "rrg",
+  "spectral-clustering": "clustering",
+  "regime-detection": "regime",
+  "fama-french": "fama_french",
+};
+
+/** A plausible deterministic-looking result id, e.g. `clustering_a1b2c3d4e5f60718`. */
+function mockResultId(schemaId: string): string {
+  const prefix = RESULT_PREFIX[schemaId] ?? "result";
+  const hex = crypto.randomUUID().replace(/-/g, "").slice(0, 16);
+  return `${prefix}_${hex}`;
+}
+
 /** Mock data: a handful of previously submitted jobs across tools/statuses. */
 function createSeedJobs(userId: string): Job[] {
   const now = Date.now();
@@ -50,6 +65,7 @@ function createSeedJobs(userId: string): Job[] {
     schemaId,
     status,
     payload,
+    resultId: mockResultId(schemaId),
     createdAt: now - ago,
     updatedAt: now - ago,
   });
@@ -116,6 +132,8 @@ export type SubmitJobInput = {
 export type SubmitJobResult = {
   ok: boolean;
   requestId: string;
+  /** The deterministic result id, known at submit time. */
+  resultId: string;
   receivedAt: number;
 };
 
@@ -128,6 +146,7 @@ export function submitJob(
   input: SubmitJobInput,
 ): Promise<SubmitJobResult> {
   const requestId = crypto.randomUUID();
+  const resultId = mockResultId(input.schemaId);
   const now = Date.now();
   const job: Job = {
     id: requestId,
@@ -135,6 +154,7 @@ export function submitJob(
     schemaId: input.schemaId,
     status: "queued",
     payload: input.payload,
+    resultId,
     createdAt: now,
     updatedAt: now,
   };
@@ -146,9 +166,73 @@ export function submitJob(
     userId,
     schemaId: input.schemaId,
     requestId,
+    resultId,
     payload: input.payload,
   });
-  return delay({ ok: true, requestId, receivedAt: now }, 900);
+  return delay({ ok: true, requestId, resultId, receivedAt: now }, 900);
+}
+
+/** Canned aspect tables so the Job Status "view table" links work in mock mode. */
+const MOCK_ASPECT_TABLES: Record<
+  string,
+  { columns: string[]; rows: Record<string, unknown>[] }
+> = {
+  cluster_label: {
+    columns: ["ticker", "cluster_label"],
+    rows: [
+      { ticker: "AAPL", cluster_label: 0 },
+      { ticker: "MSFT", cluster_label: 0 },
+      { ticker: "XOM", cluster_label: 1 },
+    ],
+  },
+  coordinates: {
+    columns: ["timestamp", "ticker", "relative_strength", "relative_momentum"],
+    rows: [
+      {
+        timestamp: "2024-01-02 00:00:00",
+        ticker: "AAPL",
+        relative_strength: 1.04,
+        relative_momentum: 0.21,
+      },
+      {
+        timestamp: "2024-01-02 00:00:00",
+        ticker: "MSFT",
+        relative_strength: 0.98,
+        relative_momentum: -0.12,
+      },
+    ],
+  },
+  regime_label: {
+    columns: ["timestamp", "ticker", "regime_label"],
+    rows: [
+      { timestamp: "2024-01-02 00:00:00", ticker: "AAPL", regime_label: 0 },
+      { timestamp: "2024-01-03 00:00:00", ticker: "AAPL", regime_label: 1 },
+    ],
+  },
+  ff_residuals: {
+    columns: ["date", "ticker", "specification", "residual", "p_value"],
+    rows: [
+      {
+        date: "2024-01-15",
+        ticker: "AAPL",
+        specification: "FF6_2020-01-01_2023-12-31",
+        residual: 0.012,
+        p_value: 0.31,
+      },
+    ],
+  },
+};
+
+/** Return a canned result-aspect table (mock stand-in for `GET /results/...`). */
+export function getResultAspect(
+  resultId: string,
+  aspect: string,
+): Promise<ResultTable> {
+  const table = MOCK_ASPECT_TABLES[aspect] ?? { columns: [], rows: [] };
+  return delay(
+    { resultId, aspect, columns: table.columns, rows: table.rows },
+    200,
+  );
 }
 
 /**

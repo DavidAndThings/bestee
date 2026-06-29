@@ -11,9 +11,15 @@ from pydantic import BaseModel
 
 
 class TaskHandle(BaseModel):
-    """Returned when a job is accepted onto the queue."""
+    """Returned when a job is accepted onto the queue.
+
+    ``result_id`` is the deterministic, request-derived id the worker will save
+    the result under. It is known at submit time -- before the job runs -- so a
+    client can use it immediately at ``GET /results/{result_id}/...``.
+    """
 
     task_id: str
+    result_id: str
 
 
 class TaskStatus(BaseModel):

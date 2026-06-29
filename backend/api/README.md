@@ -24,9 +24,12 @@ validate against a single source of truth.
 | `GET`  | `/sic/{sic_code}/tickers`| --                    | Tickers classified under a SIC code.         |
 | `GET`  | `/health`                | --                    | Liveness probe.                              |
 
-A successful `POST` returns `202 Accepted` with a `TaskHandle` (`{"task_id": ...}`).
-Poll `GET /jobs/{task_id}` until `state` is `SUCCESS` (carries `result`) or
-`FAILURE` (carries `error`).
+A successful `POST` returns `202 Accepted` with a `TaskHandle`
+(`{"task_id": ..., "result_id": ...}`). The `result_id` is deterministic -- a
+hash of the resolved request, identical to what the worker saves under -- so it
+is known immediately and a client can build the `/results/{result_id}/{aspect}`
+URL before the job finishes (it `404`s until the result is written). Poll
+`GET /jobs/{task_id}` until `state` is `SUCCESS` or `FAILURE` (carries `error`).
 
 ### Result aspects
 

@@ -44,6 +44,12 @@ export type Schema = {
   imageUrl?: string;
   buttonVariant?: ButtonVariant;
   /**
+   * The result aspect this analysis produces, served as a table at
+   * `GET /results/{result_id}/{aspect}`. Drives the "view table" link shown on
+   * the Job Status page once a job completes.
+   */
+  aspect?: string;
+  /**
    * Ordered map of field definitions. Insertion order determines the order in
    * which fields are rendered in the chart setup form.
    */
@@ -67,6 +73,7 @@ const RELATIVE_ROTATION_GRAPH_SCHEMA: Schema = {
   name: "Relative Rotation Graph",
   description: "The relative rotation graph for a given set of securities.",
   badge: "Markets",
+  aspect: "coordinates",
   imageUrl: server,
   buttonVariant: "btn-primary",
   parameters: {
@@ -202,6 +209,7 @@ const SPECTRAL_CLUSTERING_SCHEMA: Schema = {
   description:
     "Group securities into clusters by their residual (market-neutral) co-movement.",
   badge: "Clustering",
+  aspect: "cluster_label",
   imageUrl: computer,
   buttonVariant: "btn-accent",
   parameters: {
@@ -264,6 +272,7 @@ const REGIME_DETECTION_SCHEMA: Schema = {
   description:
     "Label each security's history into market regimes (e.g. calm vs. turbulent).",
   badge: "Markets",
+  aspect: "regime_label",
   imageUrl: pencil,
   buttonVariant: "btn-info",
   parameters: {
@@ -324,6 +333,7 @@ const FAMA_FRENCH_SCHEMA: Schema = {
   description:
     "Fit a Fama-French factor regression for each security over an estimation window.",
   badge: "Factors",
+  aspect: "ff_residuals",
   imageUrl: nokia,
   buttonVariant: "btn-success",
   parameters: {

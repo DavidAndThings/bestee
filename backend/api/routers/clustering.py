@@ -6,9 +6,8 @@ from bestee_compute.workflow.tuning import ClusteringRequest
 from fastapi import APIRouter, Depends
 
 from auth import get_user_email
-from celery_client import dispatch
-from resolve import resolve_request
 from schemas import TaskHandle
+from submit import enqueue
 
 router = APIRouter(prefix="/tasks", tags=["clustering"])
 
@@ -19,5 +18,4 @@ def submit_clustering(
     email: Annotated[str | None, Depends(get_user_email)],
 ) -> TaskHandle:
     """Enqueue a clustering job and return its task id."""
-    task_id = dispatch("tuning.optimize_clustering", resolve_request(request), email)
-    return TaskHandle(task_id=task_id)
+    return enqueue("clustering", "tuning.optimize_clustering", request, email)
