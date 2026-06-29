@@ -1,0 +1,25 @@
+{
+  "languages": {
+    "Python": {
+      // Use ty as the Python language server instead of pyright.
+      // ty is already the project's type checker (pre-commit); running it in
+      // the editor means the squiggles you see are exactly the errors that
+      // would fail CI — no noise, no discrepancy.
+      //
+      // ty auto-discovers each subproject's venv from the nearest
+      // pyproject.toml, so the multi-venv monorepo works correctly
+      // without any extra configuration.
+      "language_servers": ["ty", "!pyright"]
+    }
+  },
+  "lsp": {
+    "ty": {
+      "binary": {
+        // Run ty's LSP server via uvx -- consistent with how pre-commit
+        // invokes it and keeps the editor in sync with CI.
+        "path": "uvx",
+        "arguments": ["ty", "server"]
+      }
+    }
+  }
+}
