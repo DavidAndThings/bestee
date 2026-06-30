@@ -6,6 +6,10 @@ export type CardProps = {
   badge?: string;
   imageUrl?: string;
   actionLabel?: string;
+  /** Full daisyUI button colour class for the action CTA (e.g. "btn-secondary").
+   *  Picked per render position so adjacent cards differ and a card's button
+   *  never matches its badge — see `actionButtonClasses` in lib/badge. */
+  buttonClass?: string;
   onAction?: () => void;
   onFavourite?: () => void;
   favourited?: boolean;
@@ -17,6 +21,7 @@ function Card({
   badge,
   imageUrl,
   actionLabel = "Start",
+  buttonClass = "btn-primary",
   onAction,
   onFavourite,
   favourited = false,
@@ -83,9 +88,9 @@ function Card({
         <div className="card-actions mt-2 justify-end">
           <button
             type="button"
-            // The card action is the single, consistent primary CTA; category is
-            // conveyed by the colour-coded badge instead (see lib/badge).
-            className="btn btn-primary"
+            // The action colour is assigned per position so neighbouring cards
+            // differ and it contrasts with this card's badge (see lib/badge).
+            className={`btn ${buttonClass}`}
             onClick={() => onAction?.()}
           >
             {actionLabel}
