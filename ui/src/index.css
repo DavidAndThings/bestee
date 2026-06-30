@@ -1,8 +1,90 @@
 @import "tailwindcss";
 @plugin "daisyui" {
-  themes: dark --default;
+    themes: dark --default;
 }
 
 body {
-  margin: 0;
+    margin: 0;
+}
+
+/* ── Home-card colour scheme ──────────────────────────────────────────────
+   A cohesive palette for the home cards on the dark canvas: soft, translucent
+   category badges paired with solid cool jewel-tone CTA buttons. Authored as
+   plain (unlayered) CSS so it reliably wins over daisyUI's layered .badge/.btn
+   colours. Hue assignment lives in src/lib/badge.ts. */
+
+/* Soft badges: faint tinted fill, bright text, hairline ring. */
+.badge-soft-indigo,
+.badge-soft-amber,
+.badge-soft-emerald,
+.badge-soft-neutral {
+    border-width: 1px;
+    border-style: solid;
+}
+.badge-soft-indigo {
+    background-color: color-mix(in oklab, #6366f1 20%, transparent);
+    border-color: color-mix(in oklab, #6366f1 38%, transparent);
+    color: #c7d2fe;
+}
+.badge-soft-amber {
+    background-color: color-mix(in oklab, #f59e0b 20%, transparent);
+    border-color: color-mix(in oklab, #f59e0b 38%, transparent);
+    color: #fcd34d;
+}
+.badge-soft-emerald {
+    background-color: color-mix(in oklab, #10b981 20%, transparent);
+    border-color: color-mix(in oklab, #10b981 38%, transparent);
+    color: #6ee7b7;
+}
+.badge-soft-neutral {
+    background-color: color-mix(in oklab, #94a3b8 18%, transparent);
+    border-color: color-mix(in oklab, #94a3b8 34%, transparent);
+    color: #e2e8f0;
+}
+
+/* Solid CTA buttons: rich jewel fill, white label, a subtle lift on hover. */
+.btn-solid-indigo,
+.btn-solid-sky,
+.btn-solid-violet,
+.btn-solid-teal,
+.btn-solid-blue,
+.btn-solid-cyan {
+    border-color: transparent;
+    color: #fff;
+}
+.btn-solid-indigo {
+    background-color: #4f46e5;
+}
+.btn-solid-indigo:hover {
+    background-color: #6366f1;
+}
+.btn-solid-sky {
+    background-color: #0369a1;
+}
+.btn-solid-sky:hover {
+    background-color: #0284c7;
+}
+.btn-solid-violet {
+    background-color: #7c3aed;
+}
+.btn-solid-violet:hover {
+    background-color: #8b5cf6;
+}
+.btn-solid-teal {
+    background-color: #0f766e;
+}
+.btn-solid-teal:hover {
+    background-color: #0d9488;
+}
+.btn-solid-blue {
+    background-color: #2563eb;
+}
+.btn-solid-blue:hover {
+    background-color: #3b82f6;
+}
+.btn-solid-cyan {
+    background-color: #0e7490;
+}
+.btn-solid-cyan:hover {
+    background-color: #0891b2;
 }

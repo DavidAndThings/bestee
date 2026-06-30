@@ -209,9 +209,7 @@ function ChartSetupPage() {
                   </p>
                 </div>
                 {schema.badge && (
-                  <span
-                    className={`badge badge-outline ${badgeClass(schema.badge)}`}
-                  >
+                  <span className={`badge ${badgeClass(schema.badge)}`}>
                     {schema.badge}
                   </span>
                 )}

@@ -21,7 +21,7 @@ function Card({
   badge,
   imageUrl,
   actionLabel = "Start",
-  buttonClass = "btn-primary",
+  buttonClass = "btn-solid-indigo",
   onAction,
   onFavourite,
   favourited = false,
