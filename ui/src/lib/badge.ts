@@ -4,8 +4,8 @@
  *  pairing reads as a category. The colours live in index.css as
  *  `badge-soft-*` / `btn-solid-*`. */
 const CATEGORY_COMBO: Record<string, { badge: string; button: string }> = {
-  // Analogous cool: soft indigo tag, solid violet CTA.
-  Analysis: { badge: "indigo", button: "violet" },
+  // Cool harmony: soft indigo tag, solid deep-sky CTA.
+  Analysis: { badge: "indigo", button: "sky" },
   // Warm-on-warm: soft amber tag, solid burnt-orange CTA in the same family.
   Reference: { badge: "amber", button: "orange" },
   // Analogous green family: soft emerald tag, solid teal CTA.

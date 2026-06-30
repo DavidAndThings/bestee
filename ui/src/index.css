@@ -44,7 +44,7 @@ body {
 
 /* Solid CTA buttons: rich jewel fill, white label, a subtle lift on hover. */
 .btn-solid-indigo,
-.btn-solid-violet,
+.btn-solid-sky,
 .btn-solid-teal,
 .btn-solid-orange {
     border-color: transparent;
@@ -56,11 +56,11 @@ body {
 .btn-solid-indigo:hover {
     background-color: #6366f1;
 }
-.btn-solid-violet {
-    background-color: #6d28d9;
+.btn-solid-sky {
+    background-color: #0369a1;
 }
-.btn-solid-violet:hover {
-    background-color: #7c3aed;
+.btn-solid-sky:hover {
+    background-color: #0284c7;
 }
 .btn-solid-teal {
     background-color: #0f766e;
