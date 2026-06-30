@@ -3,6 +3,7 @@ import type {
   JobDetail,
   JobStatus,
   ResultTable,
+  SearchResult,
   SicCode,
   SicTicker,
 } from "../lib/types";
@@ -242,7 +243,19 @@ export async function tickersForSic(sicCode: string): Promise<SicTicker[]> {
   }));
 }
 
-export async function search(query: string, limit = 20): Promise<string[]> {
+/** One `/search` match as returned by the API (snake/cased `SearchResult`). */
+type ApiSearchResult = {
+  value: string;
+  label: string;
+  kind: "ticker" | "sic";
+  ticker?: string | null;
+  name?: string | null;
+};
+
+export async function search(
+  query: string,
+  limit = 20,
+): Promise<SearchResult[]> {
   const trimmed = query.trim();
   if (!trimmed) return [];
   const url = `${API_BASE_URL}/search?q=${encodeURIComponent(trimmed)}&limit=${limit}`;
@@ -268,6 +281,14 @@ export async function search(query: string, limit = 20): Promise<string[]> {
     );
     throw new Error(`Search failed (${response.status})`);
   }
-  const data = (await response.json()) as { results?: string[] };
-  return Array.isArray(data.results) ? data.results : [];
+  const data = (await response.json()) as { results?: ApiSearchResult[] };
+  return Array.isArray(data.results)
+    ? data.results.map((r) => ({
+        value: r.value,
+        label: r.label,
+        kind: r.kind,
+        ticker: r.ticker ?? null,
+        name: r.name ?? null,
+      }))
+    : [];
 }

@@ -3,6 +3,7 @@ import type {
   JobDetail,
   JobStatus,
   ResultTable,
+  SearchResult,
   SicCode,
   SicTicker,
 } from "../lib/types";
@@ -299,59 +300,69 @@ export function getResultAspect(
  * ticker autocomplete behave realistically against the mock. The real backend
  * resolves a chosen term to ticker symbols at submission time.
  */
-const SEARCH_CATALOG: string[] = [
-  // Company names (as the Massive ticker universe reports them).
-  "Apple Inc.",
-  "Microsoft Corporation",
-  "NVIDIA Corporation",
-  "Alphabet Inc. Class A",
-  "Alphabet Inc. Class C",
-  "Amazon.com, Inc.",
-  "Meta Platforms, Inc.",
-  "Tesla, Inc.",
-  "Broadcom Inc.",
-  "Berkshire Hathaway Inc.",
-  "JPMorgan Chase & Co.",
-  "Visa Inc.",
-  "Mastercard Incorporated",
-  "Eli Lilly and Company",
-  "UnitedHealth Group Incorporated",
-  "Exxon Mobil Corporation",
-  "Johnson & Johnson",
-  "Procter & Gamble Company",
-  "Home Depot, Inc.",
-  "Bank of America Corporation",
-  "AbbVie Inc.",
-  "Coca-Cola Company",
-  "PepsiCo, Inc.",
-  "Costco Wholesale Corporation",
-  "Adobe Inc.",
-  "Salesforce, Inc.",
-  "Advanced Micro Devices, Inc.",
-  "Netflix, Inc.",
-  "Intel Corporation",
-  "Cisco Systems, Inc.",
-  "Walmart Inc.",
-  "Walt Disney Company",
-  "McDonald's Corporation",
-  "Nike, Inc.",
-  "Oracle Corporation",
-  "QUALCOMM Incorporated",
-  "Texas Instruments Incorporated",
-  "Pfizer Inc.",
-  "Chevron Corporation",
-  "Wells Fargo & Company",
-  "Goldman Sachs Group, Inc.",
-  "Morgan Stanley",
-  "International Business Machines Corporation",
-  "American Express Company",
-  "Boeing Company",
-  "Caterpillar Inc.",
-  "Starbucks Corporation",
-  "Micron Technology, Inc.",
-  "Palantir Technologies Inc.",
-  "Uber Technologies, Inc.",
-  // SIC industry titles (upper-case, as the SEC publishes them).
+/** A catalog entry plus the lowercased fields the mock search matches on. */
+type MockEntry = SearchResult & { haystacks: string[] };
+
+// Securities as [symbol, name] (stocks plus a couple of ETFs), matched by
+// either field -- mirrors the live catalog built from the ticker universe.
+const MOCK_SECURITIES: [string, string][] = [
+  ["AAPL", "Apple Inc."],
+  ["MSFT", "Microsoft Corporation"],
+  ["NVDA", "NVIDIA Corporation"],
+  ["GOOGL", "Alphabet Inc. Class A"],
+  ["GOOG", "Alphabet Inc. Class C"],
+  ["AMZN", "Amazon.com, Inc."],
+  ["META", "Meta Platforms, Inc."],
+  ["TSLA", "Tesla, Inc."],
+  ["AVGO", "Broadcom Inc."],
+  ["BRK.B", "Berkshire Hathaway Inc."],
+  ["JPM", "JPMorgan Chase & Co."],
+  ["V", "Visa Inc."],
+  ["MA", "Mastercard Incorporated"],
+  ["LLY", "Eli Lilly and Company"],
+  ["UNH", "UnitedHealth Group Incorporated"],
+  ["XOM", "Exxon Mobil Corporation"],
+  ["JNJ", "Johnson & Johnson"],
+  ["PG", "Procter & Gamble Company"],
+  ["HD", "Home Depot, Inc."],
+  ["BAC", "Bank of America Corporation"],
+  ["ABBV", "AbbVie Inc."],
+  ["KO", "Coca-Cola Company"],
+  ["PEP", "PepsiCo, Inc."],
+  ["COST", "Costco Wholesale Corporation"],
+  ["ADBE", "Adobe Inc."],
+  ["CRM", "Salesforce, Inc."],
+  ["AMD", "Advanced Micro Devices, Inc."],
+  ["NFLX", "Netflix, Inc."],
+  ["INTC", "Intel Corporation"],
+  ["CSCO", "Cisco Systems, Inc."],
+  ["WMT", "Walmart Inc."],
+  ["DIS", "Walt Disney Company"],
+  ["MCD", "McDonald's Corporation"],
+  ["NKE", "Nike, Inc."],
+  ["ORCL", "Oracle Corporation"],
+  ["QCOM", "QUALCOMM Incorporated"],
+  ["TXN", "Texas Instruments Incorporated"],
+  ["PFE", "Pfizer Inc."],
+  ["CVX", "Chevron Corporation"],
+  ["WFC", "Wells Fargo & Company"],
+  ["GS", "Goldman Sachs Group, Inc."],
+  ["MS", "Morgan Stanley"],
+  ["IBM", "International Business Machines Corporation"],
+  ["AXP", "American Express Company"],
+  ["BA", "Boeing Company"],
+  ["CAT", "Caterpillar Inc."],
+  ["SBUX", "Starbucks Corporation"],
+  ["MU", "Micron Technology, Inc."],
+  ["PLTR", "Palantir Technologies Inc."],
+  ["UBER", "Uber Technologies, Inc."],
+  ["SPY", "SPDR S&P 500 ETF Trust"],
+  ["QQQ", "Invesco QQQ Trust"],
+];
+
+// SIC industry titles (upper-case, as the SEC publishes them). A single term
+// that expands to many tickers, so it stays one entry matched by its title.
+const MOCK_SIC_TITLES: string[] = [
   "SERVICES-PREPACKAGED SOFTWARE",
   "SEMICONDUCTORS & RELATED DEVICES",
   "ELECTRONIC COMPUTERS",
@@ -371,6 +382,25 @@ const SEARCH_CATALOG: string[] = [
   "SERVICES-COMPUTER INTEGRATED SYSTEMS DESIGN",
   "RETAIL-CATALOG & MAIL-ORDER HOUSES",
   "SERVICES-BUSINESS SERVICES, NEC",
+];
+
+const SEARCH_CATALOG: MockEntry[] = [
+  ...MOCK_SECURITIES.map(([ticker, name]) => ({
+    value: ticker,
+    label: `${name} (${ticker})`,
+    kind: "ticker" as const,
+    ticker,
+    name,
+    haystacks: [ticker.toLowerCase(), name.toLowerCase()],
+  })),
+  ...MOCK_SIC_TITLES.map((title) => ({
+    value: title,
+    label: title,
+    kind: "sic" as const,
+    ticker: null,
+    name: null,
+    haystacks: [title.toLowerCase()],
+  })),
 ];
 
 /** A representative slice of the SEC SIC code list for the mock browser. */
@@ -469,23 +499,40 @@ export function tickersForSic(sicCode: string): Promise<SicTicker[]> {
 }
 
 /**
- * Search the catalog for *query* (case-insensitive substring), ranking prefix
- * matches ahead of other matches -- mirroring the backend `/search` endpoint.
+ * Search the catalog for *query* by ticker symbol, company/ETF name, or SIC
+ * industry title (case-insensitive). Exact matches rank ahead of prefixes,
+ * which rank ahead of other substrings -- mirroring the backend `/search`.
  * Swap this for an authenticated HTTP call when wiring up the live API.
  */
-export function search(query: string, limit = 20): Promise<string[]> {
+export function search(query: string, limit = 20): Promise<SearchResult[]> {
   const needle = query.trim().toLowerCase();
-  if (!needle) return delay<string[]>([], 120);
-  const prefix: string[] = [];
-  const other: string[] = [];
-  const seen = new Set<string>();
-  for (const term of SEARCH_CATALOG) {
-    const folded = term.toLowerCase();
-    if (!folded.includes(needle) || seen.has(folded)) continue;
-    seen.add(folded);
-    (folded.startsWith(needle) ? prefix : other).push(term);
+  if (!needle) return delay<SearchResult[]>([], 120);
+  const ranked: { tier: number; label: string; entry: MockEntry }[] = [];
+  for (const entry of SEARCH_CATALOG) {
+    let tier: number | null = null;
+    for (const field of entry.haystacks) {
+      if (!field.includes(needle)) continue;
+      const t = field === needle ? 0 : field.startsWith(needle) ? 1 : 2;
+      tier = tier === null ? t : Math.min(tier, t);
+    }
+    if (tier !== null) {
+      ranked.push({ tier, label: entry.label.toLowerCase(), entry });
+    }
   }
-  prefix.sort();
-  other.sort();
-  return delay([...prefix, ...other].slice(0, limit), 120);
+  ranked.sort((a, b) => a.tier - b.tier || a.label.localeCompare(b.label));
+  const out: SearchResult[] = [];
+  const seen = new Set<string>();
+  for (const { entry } of ranked) {
+    if (seen.has(entry.value)) continue;
+    seen.add(entry.value);
+    out.push({
+      value: entry.value,
+      label: entry.label,
+      kind: entry.kind,
+      ticker: entry.ticker ?? null,
+      name: entry.name ?? null,
+    });
+    if (out.length >= limit) break;
+  }
+  return delay(out, 120);
 }

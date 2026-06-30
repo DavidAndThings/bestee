@@ -5,6 +5,7 @@ import type {
   Job,
   JobDetail,
   ResultTable,
+  SearchResult,
   SicCode,
   SicTicker,
 } from "../lib/types";
@@ -17,7 +18,7 @@ type JobsBackend = {
   getJob(taskId: string): Promise<JobDetail>;
   submitJob(userId: string, input: SubmitJobInput): Promise<SubmitJobResult>;
   getResultAspect(resultId: string, aspect: string): Promise<ResultTable>;
-  search(query: string, limit?: number): Promise<string[]>;
+  search(query: string, limit?: number): Promise<SearchResult[]>;
   listSicCodes(): Promise<SicCode[]>;
   tickersForSic(sicCode: string): Promise<SicTicker[]>;
 };
@@ -47,8 +48,8 @@ export const jobsApi = {
   getResultAspect(resultId: string, aspect: string): Promise<ResultTable> {
     return backend.getResultAspect(resultId, aspect);
   },
-  /** Search the term catalog (company names + SIC industry titles). */
-  search(query: string, limit?: number): Promise<string[]> {
+  /** Search the catalog by ticker symbol, company/ETF name, or SIC industry. */
+  search(query: string, limit?: number): Promise<SearchResult[]> {
     return backend.search(query, limit);
   },
   /** List every SIC industry code and its title. */

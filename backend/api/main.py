@@ -39,7 +39,7 @@ _CORS_ALLOW_ORIGINS = [
 def _warm_search_catalog() -> None:
     """Build the /search catalog so the first request isn't a cold ~5s fetch."""
     try:
-        ticker.get_all_search_terms()
+        ticker.get_search_catalog()
         logging.getLogger("api").info("search catalog warmed")
     except Exception:
         logging.getLogger("api").warning("search catalog warm failed", exc_info=True)

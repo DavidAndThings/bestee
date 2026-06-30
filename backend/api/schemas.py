@@ -5,7 +5,7 @@ The *request* models are reused directly from ``bestee_compute.workflow.tuning``
 single source of truth. Only the API-specific response models live here.
 """
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel
 
@@ -71,12 +71,29 @@ class ResultTable(BaseModel):
     rows: list[dict[str, Any]]
 
 
+class SearchResult(BaseModel):
+    """One search match: the term to submit plus how to display it.
+
+    ``value`` is what the field stores and the backend resolves -- a ticker
+    symbol for a security (stock or ETF), or a SIC industry title. ``label`` is
+    the display string (e.g. ``"Apple Inc (AAPL)"``). ``kind`` separates a
+    single security from an industry that expands to many tickers; ``ticker``
+    and ``name`` are set for securities so the UI can show symbol and name.
+    """
+
+    value: str
+    label: str
+    kind: Literal["ticker", "sic"]
+    ticker: str | None = None
+    name: str | None = None
+
+
 class SearchResults(BaseModel):
-    """Search terms matching a query, ranked with prefix matches first."""
+    """Search matches for a query, ranked with exact/prefix matches first."""
 
     query: str
     count: int
-    results: list[str]
+    results: list[SearchResult]
 
 
 class SicCode(BaseModel):

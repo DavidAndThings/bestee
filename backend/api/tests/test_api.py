@@ -16,6 +16,7 @@ from fastapi.testclient import TestClient
 
 import main
 from auth import require_auth
+from routers.ticker import _CatalogEntry
 
 # Bypass Clerk authentication in all tests.
 main.app.dependency_overrides[require_auth] = lambda: {"sub": "test_user"}
@@ -482,26 +483,71 @@ def test_list_results_returns_empty_when_dir_absent() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_search_ranks_prefix_matches_first() -> None:
-    terms = [
-        "SERVICES-PREPACKAGED SOFTWARE",
-        "Software AG",
-        "Microsoft Corp",
-        "Apple Inc",
+def _ticker_entry(symbol: str, name: str) -> _CatalogEntry:
+    return _CatalogEntry(
+        value=symbol,
+        label=f"{name} ({symbol})",
+        kind="ticker",
+        ticker=symbol,
+        name=name,
+        haystacks=(symbol.casefold(), name.casefold()),
+    )
+
+
+def _sic_entry(title: str) -> _CatalogEntry:
+    return _CatalogEntry(
+        value=title,
+        label=title,
+        kind="sic",
+        ticker=None,
+        name=None,
+        haystacks=(title.casefold(),),
+    )
+
+
+def test_search_matches_symbol_and_ranks_exact_first() -> None:
+    catalog = [
+        _sic_entry("SERVICES-PREPACKAGED SOFTWARE"),
+        _ticker_entry("MSFT", "Microsoft Corp"),
+        _ticker_entry("AAPL", "Apple Inc"),
     ]
-    with patch("routers.ticker.get_all_search_terms", return_value=terms):
-        response = client.get("/search", params={"q": "software"})
-    assert response.status_code == 200
-    data = response.json()
-    assert data["query"] == "software"
-    # "Software AG" (prefix) ranks ahead of the substring match.
-    assert data["results"] == ["Software AG", "SERVICES-PREPACKAGED SOFTWARE"]
+    with patch("routers.ticker.get_search_catalog", return_value=catalog):
+        # An exact ticker symbol resolves to that security, shown as Name (SYM).
+        response = client.get("/search", params={"q": "aapl"})
+        assert response.status_code == 200
+        top = response.json()["results"][0]
+        assert top["value"] == "AAPL"
+        assert top["kind"] == "ticker"
+        assert top["label"] == "Apple Inc (AAPL)"
+        assert top["name"] == "Apple Inc"
+
+        # "soft" matches a company name and a SIC title (both substrings).
+        data = client.get("/search", params={"q": "soft"}).json()
+        values = [r["value"] for r in data["results"]]
+        assert "MSFT" in values  # via "Microsoft Corp"
+        assert "SERVICES-PREPACKAGED SOFTWARE" in values
+        kinds = {r["value"]: r["kind"] for r in data["results"]}
+        assert kinds["SERVICES-PREPACKAGED SOFTWARE"] == "sic"
+
+
+def test_search_ranks_prefix_above_substring() -> None:
+    catalog = [
+        _sic_entry("SERVICES-PREPACKAGED SOFTWARE"),
+        _ticker_entry("SFTW", "Software AG"),
+    ]
+    with patch("routers.ticker.get_search_catalog", return_value=catalog):
+        data = client.get("/search", params={"q": "software"}).json()
+    # "Software AG" (name prefix) ranks ahead of the SIC-title substring match.
+    assert [r["value"] for r in data["results"]] == [
+        "SFTW",
+        "SERVICES-PREPACKAGED SOFTWARE",
+    ]
     assert data["count"] == 2
 
 
 def test_search_respects_limit() -> None:
-    terms = [f"Bank of {i:02d}" for i in range(50)]
-    with patch("routers.ticker.get_all_search_terms", return_value=terms):
+    catalog = [_ticker_entry(f"BK{i:02d}", f"Bank of {i:02d}") for i in range(50)]
+    with patch("routers.ticker.get_search_catalog", return_value=catalog):
         response = client.get("/search", params={"q": "bank", "limit": 5})
     assert response.status_code == 200
     assert len(response.json()["results"]) == 5
@@ -772,8 +818,11 @@ def test_aspect_ff_residuals() -> None:
         "specification",
         "residual",
         "p_value",
+        "estimated",
     ]
     assert data["rows"][0]["p_value"] == pytest.approx(0.31)
+    # No Estimated column on this (legacy-shaped) frame -> defaults to False.
+    assert data["rows"][0]["estimated"] is False
 
 
 def test_aspect_unknown_returns_404() -> None:

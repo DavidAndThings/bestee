@@ -12,6 +12,21 @@ export type SicTicker = {
   name: string | null;
 };
 
+/**
+ * One `/search` match. `value` is what the field stores and the backend
+ * resolves -- a ticker symbol for a security (stock or ETF), or a SIC industry
+ * title. `label` is the display string (e.g. "Apple Inc (AAPL)"). `kind`
+ * separates a single security from an industry that expands to many tickers;
+ * `ticker`/`name` are set for securities so the dropdown can show both.
+ */
+export type SearchResult = {
+  value: string;
+  label: string;
+  kind: "ticker" | "sic";
+  ticker?: string | null;
+  name?: string | null;
+};
+
 /** A submitted chart job, uniquely identified by a uuid. */
 export type Job = {
   id: string;

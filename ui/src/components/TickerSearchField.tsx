@@ -7,10 +7,11 @@ import {
   type KeyboardEvent,
 } from "react";
 import { jobsApi } from "../services/jobsApi";
+import type { SearchResult } from "../lib/types";
 
 type Props = {
   id?: string;
-  /** Selected terms: ticker symbols, company names, or SIC industry titles. */
+  /** Selected terms: ticker symbols or SIC industry titles. */
   values: string[];
   onChange: (values: string[]) => void;
   invalid?: boolean;
@@ -33,10 +34,12 @@ const noAutofill = {
 };
 
 /**
- * A multi-select autocomplete over the `/search` catalog (company names + SIC
- * industry titles). Users type to search, pick one or more matches that show as
- * removable chips, and the backend later resolves each term to ticker symbols.
- * Set `single` for one-value fields. Reads and writes a `string[]` of terms.
+ * A multi-select autocomplete over the `/search` catalog: securities (matched
+ * by ticker symbol or company/ETF name, shown as "Name (SYMBOL)") and SIC
+ * industry titles. Users type to search, pick one or more matches that show as
+ * removable chips, and the backend later resolves each stored value (a symbol
+ * or industry title) to ticker symbols. Set `single` for one-value fields.
+ * Reads and writes a `string[]` of the selected values.
  */
 export default function TickerSearchField({
   id,
@@ -45,10 +48,10 @@ export default function TickerSearchField({
   invalid,
   autoFocus,
   single = false,
-  placeholder = "Search companies or industries…",
+  placeholder = "Search by symbol, name, or industry…",
 }: Props) {
   const [query, setQuery] = useState("");
-  const [results, setResults] = useState<string[]>([]);
+  const [results, setResults] = useState<SearchResult[]>([]);
   const [loading, setLoading] = useState(false);
   const [failed, setFailed] = useState(false);
   const [open, setOpen] = useState(false);
@@ -57,11 +60,12 @@ export default function TickerSearchField({
   const inputRef = useRef<HTMLInputElement>(null);
   const listboxId = useId();
 
-  // Don't offer terms that are already selected.
+  // Don't offer matches whose value is already selected.
   const visible = useMemo(
     () =>
       results.filter(
-        (term) => !values.some((v) => v.toLowerCase() === term.toLowerCase()),
+        (result) =>
+          !values.some((v) => v.toLowerCase() === result.value.toLowerCase()),
       ),
     [results, values],
   );
@@ -146,7 +150,7 @@ export default function TickerSearchField({
         if (visible.length > 0) {
           const index =
             highlight >= 0 && highlight < visible.length ? highlight : 0;
-          addTerm(visible[index]);
+          addTerm(visible[index].value);
         }
       }
     } else if (event.key === "Escape") {
@@ -235,26 +239,39 @@ export default function TickerSearchField({
               No matches.
             </li>
           ) : (
-            visible.map((term, index) => (
+            visible.map((result, index) => (
               <li
-                key={term}
+                key={result.value}
                 id={`${listboxId}-opt-${index}`}
                 role="option"
                 aria-selected={index === highlight}
               >
                 <button
                   type="button"
-                  className={`block w-full cursor-pointer truncate rounded-md px-3 py-2 text-left text-sm ${
+                  className={`flex w-full cursor-pointer items-center gap-2 rounded-md px-3 py-2 text-left text-sm ${
                     index === highlight ? "bg-base-200" : "hover:bg-base-200"
                   }`}
                   // Mouse-down (before the input blurs) so the pick lands.
                   onMouseDown={(event) => {
                     event.preventDefault();
-                    addTerm(term);
+                    addTerm(result.value);
                   }}
                   onMouseEnter={() => setHighlight(index)}
                 >
-                  {term}
+                  <span className="min-w-0 flex-1 truncate">
+                    {result.kind === "ticker"
+                      ? (result.name ?? result.ticker ?? result.value)
+                      : result.label}
+                  </span>
+                  {result.kind === "ticker" && result.ticker && result.name ? (
+                    <span className="badge badge-ghost badge-sm shrink-0 font-mono">
+                      {result.ticker}
+                    </span>
+                  ) : result.kind === "sic" ? (
+                    <span className="badge badge-ghost badge-sm shrink-0">
+                      Industry
+                    </span>
+                  ) : null}
                 </button>
               </li>
             ))
