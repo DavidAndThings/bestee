@@ -7,12 +7,24 @@ import { relativeTime } from "../lib/format";
 import { JOBS_PAGE_SIZE, useJobs } from "../hooks/useJobs";
 import { jobsApi } from "../services/jobsApi";
 import refreshIcon from "../assets/icons/refresh.svg";
+import cryIcon from "../assets/icons/cry.svg";
+import neutralIcon from "../assets/icons/neutral.svg";
+import smilingIcon from "../assets/icons/smiling.svg";
 
 const STATUS_BADGE: Record<JobStatus, { label: string; className: string }> = {
   queued: { label: "Queued", className: "badge-ghost" },
   running: { label: "Running", className: "badge-info" },
   completed: { label: "Completed", className: "badge-success" },
   failed: { label: "Failed", className: "badge-error" },
+};
+
+// A face avatar per status: smiling when done, crying on failure, neutral while
+// the job is still queued or running.
+const STATUS_ICON: Record<JobStatus, string> = {
+  queued: neutralIcon,
+  running: neutralIcon,
+  completed: smilingIcon,
+  failed: cryIcon,
 };
 
 /** One collapsible job row. The header summarises the job; expanding it reveals
@@ -30,6 +42,7 @@ function JobItem({
   const toolName = schema?.name ?? job.schemaId;
   const aspects = schema?.aspects ?? [];
   const badge = STATUS_BADGE[job.status];
+  const statusIcon = STATUS_ICON[job.status];
   const resubmitting = resubmittingId === job.id;
   const busy = resubmittingId !== null;
   // The result tables only exist once the job completes; the result id is known
@@ -40,14 +53,22 @@ function JobItem({
     <details className="collapse-arrow bg-base-100 border-base-300 rounded-box collapse border">
       <summary className="collapse-title">
         <div className="flex items-center justify-between gap-3 pr-4">
-          <div className="min-w-0">
-            <p className="truncate font-semibold">{toolName}</p>
-            <p className="text-base-content/60 mt-0.5 text-xs">
-              {relativeTime(job.createdAt)} ·{" "}
-              <span className="font-mono" title={job.id}>
-                {job.id.slice(0, 8)}…
-              </span>
-            </p>
+          <div className="flex min-w-0 items-center gap-3">
+            <img
+              src={statusIcon}
+              alt=""
+              className="size-9 shrink-0"
+              aria-hidden="true"
+            />
+            <div className="min-w-0">
+              <p className="truncate font-semibold">{toolName}</p>
+              <p className="text-base-content/60 mt-0.5 text-xs">
+                {relativeTime(job.createdAt)} ·{" "}
+                <span className="font-mono" title={job.id}>
+                  {job.id.slice(0, 8)}…
+                </span>
+              </p>
+            </div>
           </div>
           <span className={`badge shrink-0 ${badge.className}`}>
             {badge.label}
