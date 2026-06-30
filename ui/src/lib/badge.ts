@@ -6,8 +6,8 @@
 const CATEGORY_COMBO: Record<string, { badge: string; button: string }> = {
   // Analogous cool: soft indigo tag, solid violet CTA.
   Analysis: { badge: "indigo", button: "violet" },
-  // Warm tag, crisp cool CTA — amber pairs cleanly with a clean blue.
-  Reference: { badge: "amber", button: "blue" },
+  // Warm-on-warm: soft amber tag, solid burnt-orange CTA in the same family.
+  Reference: { badge: "amber", button: "orange" },
   // Analogous green family: soft emerald tag, solid teal CTA.
   Monitoring: { badge: "emerald", button: "teal" },
 };
