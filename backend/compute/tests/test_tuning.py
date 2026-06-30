@@ -156,6 +156,7 @@ def test_ff_residuals_table_keeps_pvalue_per_specification() -> None:
             "Residual": [0.01, -0.02],
             "ZScore": [1.0, -2.0],
             "PValue": [0.31, 0.045],
+            "Estimated": [False, True],
         }
     )
     tuning = FamaFrenchTuning(
@@ -166,8 +167,40 @@ def test_ff_residuals_table_keeps_pvalue_per_specification() -> None:
         oos_residuals=oos,
     )
     table = tuning.ff_residuals_table()
-    assert table.columns == ["date", "ticker", "specification", "residual", "p_value"]
+    assert table.columns == [
+        "date",
+        "ticker",
+        "specification",
+        "residual",
+        "p_value",
+        "estimated",
+    ]
     assert "ZScore" not in table.columns
     assert table.height == 2
     bbb = table.filter(pl.col("ticker") == "BBB")
     assert bbb["p_value"].to_list() == [0.045]
+    assert bbb["estimated"].to_list() == [True]
+
+
+def test_ff_residuals_table_defaults_estimated_for_legacy_results() -> None:
+    # Results persisted before the estimated-factor feature have no Estimated
+    # column; the aspect view must still render, defaulting it to False.
+    oos = pl.DataFrame(
+        {
+            "Date": [dt.date(2024, 1, 15)],
+            "Ticker": ["AAA"],
+            "Specification": ["FF6_2020-01-01_2023-12-31"],
+            "Residual": [0.01],
+            "ZScore": [1.0],
+            "PValue": [0.31],
+        }
+    )
+    tuning = FamaFrenchTuning(
+        factors_to_use=6,
+        specifications=[],
+        results={},
+        mean_adjusted_r_squared=0.5,
+        oos_residuals=oos,
+    )
+    table = tuning.ff_residuals_table()
+    assert table["estimated"].to_list() == [False]

@@ -77,6 +77,13 @@ _RESIDUAL_COLUMN = "Residual"
 _ZSCORE_COLUMN = "ZScore"
 _PVALUE_COLUMN = "PValue"
 _OOS_DATE_COLUMN = "Date"
+_ESTIMATED_COLUMN = "Estimated"
+# Out-of-sample dates past Ken French's ~1-2 month publication lag have no
+# factors; they're estimated cross-sectionally from the basket itself (see
+# _estimated_residual_records). That estimate needs more tickers than factors to
+# exist at all, and several per factor to be worth trusting -- below this many
+# per factor a warning flags the residuals as unreliable.
+_MEANINGFUL_TICKERS_PER_FACTOR = 3
 
 
 class FamaFrenchSpecification(BaseModel):
@@ -155,8 +162,14 @@ def get_variables(config: AnalysisConfig) -> Mapping[str, pl.DataFrame]:
     variable, ``R_i - R_f``), and the six shared factor columns ``Mkt-RF``,
     ``SMB``, ``HML``, ``RMW``, ``CMA`` and ``Mom`` (the regressors). All
     values are daily decimals, time-aligned on the trading day, with each
-    ticker's warm-up/missing rows dropped independently -- so the model is
+    ticker's warm-up/non-trading rows dropped independently -- so the model is
     ``ExcessReturn ~ Mkt-RF + SMB + HML + RMW + CMA + Mom`` per frame.
+
+    Trading days past the factor coverage (Ken French lags ~1-2 months) are
+    kept with **null factor columns** rather than dropped, so the residual path
+    can estimate factors for those out-of-sample dates cross-sectionally; ``RF``
+    is forward-filled there (it is near-constant day to day) so ``ExcessReturn``
+    stays defined.
 
     The factors are fetched once and shared across the per-ticker frames.
     """
@@ -179,7 +192,15 @@ def get_variables(config: AnalysisConfig) -> Mapping[str, pl.DataFrame]:
             ],
         )
     )
-    merged = returns.join(fetch_fama_french_factors(), on=_DATE_COLUMN, how="inner")
+    # Left-join (not inner) so trading days past the factor coverage survive
+    # with null factors -- the residual path estimates those factors cross-
+    # sectionally. Forward-fill RF (near-constant day to day) so excess return
+    # stays defined on that uncovered tail.
+    merged = (
+        returns.join(fetch_fama_french_factors(), on=_DATE_COLUMN, how="left")
+        .sort(_DATE_COLUMN)
+        .with_columns(pl.col(_RISK_FREE_COLUMN).forward_fill())
+    )
     return {
         ticker: merged.select(
             OHLCHeader.TIMESTAMP,
@@ -188,7 +209,7 @@ def get_variables(config: AnalysisConfig) -> Mapping[str, pl.DataFrame]:
                 pl.col(f"{ticker}_{_RETURN_COLUMN_NAME}") - pl.col(_RISK_FREE_COLUMN)
             ).alias(_EXCESS_RETURN_COLUMN_NAME),
             *FAMA_FRENCH_6_FACTORS,
-        ).drop_nulls()
+        ).filter(pl.col(_EXCESS_RETURN_COLUMN_NAME).is_not_null())
         for ticker in tickers
     }
 
@@ -231,7 +252,7 @@ def _fit(
     for ticker, frame in variables.items():
         window = frame.filter(
             pl.col(OHLCHeader.TIMESTAMP).dt.date().is_between(start, end)
-        )
+        ).drop_nulls(subset=[_EXCESS_RETURN_COLUMN_NAME, *factors])
         # Need more rows than parameters (intercept + factors) for a fit.
         if window.height <= len(factors) + 1:
             logger.warning(
@@ -294,9 +315,11 @@ def get_residuals(
         residual_i = (R_i - R_f) - (alpha_i + sum_k beta_{i,k} * factor_k)
 
     Every date must be strictly after *every* spec's ``end_date`` -- each spec
-    enforces this via :meth:`FamaFrenchSpecification.verify_out_of_sample` --
-    and a trading day for which factor data exists (Ken French lags ~1-2
-    months).  Dates with no observations for any ticker are skipped with a
+    enforces this via :meth:`FamaFrenchSpecification.verify_out_of_sample`. For
+    a date past the factor coverage (Ken French lags ~1-2 months) the factors
+    are **estimated cross-sectionally** from the basket and the rows are flagged
+    ``Estimated`` (see :func:`_estimated_residual_records`); this needs more
+    tickers than factors. Dates with no usable observation are skipped with a
     warning; a :exc:`ValueError` is raised only when *no* date yields records.
 
     Pass pre-built *variables* (from :func:`get_variables`) to skip the
@@ -304,12 +327,13 @@ def get_residuals(
 
     Returns:
         A long
-        ``[Date, Ticker, Specification, Residual, ZScore, PValue]`` frame --
-        one row per (date, ticker, specification) that has both a fitted model
-        and an observation on that date.  ``ZScore`` standardizes the residual
-        by the spec's own fitted idiosyncratic volatility and ``PValue`` is its
-        two-sided tail probability; both are **local to each specification**
-        and must not be compared across specifications.
+        ``[Date, Ticker, Specification, Residual, ZScore, PValue, Estimated]``
+        frame -- one row per (date, ticker, specification) that has a fitted
+        model and an observation on that date.  ``ZScore`` standardizes the
+        residual by the spec's own fitted idiosyncratic volatility and
+        ``PValue`` is its two-sided tail probability (both **local to each
+        specification**); ``Estimated`` is ``True`` when the date's factors were
+        estimated from the cross-section rather than published.
 
     Raises:
         ValueError: If any date is not after some spec's window, or no
@@ -322,15 +346,20 @@ def get_residuals(
             specification.verify_out_of_sample(target)
     if variables is None:
         variables = get_variables(config)
-    # Latest day with both a price and factor data. Ken French factors lag
-    # ~1-2 months, so out-of-sample dates past this can't be evaluated -- used
-    # to turn the otherwise-cryptic "no observation" failure into actionable
-    # guidance.
+    # Latest published-factor day across the basket. Ken French factors lag ~1-2
+    # months, so a factor column is null past this; later dates fall back to the
+    # cross-sectional estimate, and this drives the actionable failure message.
+    factor_column = FAMA_FRENCH_6_FACTORS[0]
     covered = [
         cast(dt.date, last)
         for frame in variables.values()
         if frame.height
-        and (last := frame[OHLCHeader.TIMESTAMP].dt.date().max()) is not None
+        and (
+            last := frame.drop_nulls(subset=[factor_column])[OHLCHeader.TIMESTAMP]
+            .dt.date()
+            .max()
+        )
+        is not None
     ]
     latest_covered = max(covered) if covered else None
     frames: list[pl.DataFrame] = []
@@ -341,15 +370,7 @@ def get_residuals(
             for record in _residual_records(variables, target, specification)
         ]
         if not records:
-            if latest_covered is not None and target > latest_covered:
-                logger.warning(
-                    "No factor data on %s yet (available through %s; Ken French "
-                    "factors lag ~1-2 months); skipping.",
-                    target,
-                    latest_covered,
-                )
-            else:
-                logger.warning("No ticker had an observation on %s; skipping.", target)
+            logger.warning("No out-of-sample residuals for %s; skipping.", target)
             continue
         frames.append(
             pl.DataFrame(
@@ -360,6 +381,7 @@ def get_residuals(
                     _RESIDUAL_COLUMN: pl.Float64,
                     _ZSCORE_COLUMN: pl.Float64,
                     _PVALUE_COLUMN: pl.Float64,
+                    _ESTIMATED_COLUMN: pl.Boolean,
                 },
                 orient="row",
             ).with_columns(pl.lit(date_str).alias(_OOS_DATE_COLUMN))
@@ -367,10 +389,11 @@ def get_residuals(
     if not frames:
         if latest_covered is not None and all(t > latest_covered for t in targets):
             raise ValueError(
-                f"No Fama-French factor data for out-of-sample date(s) "
-                f"{date_list}: prices and factors are only available through "
-                f"{latest_covered} (Ken French factors lag ~1-2 months). "
-                f"Choose an out-of-sample date on or before {latest_covered}."
+                f"No out-of-sample residuals for date(s) {date_list}: they are "
+                f"past the latest published Fama-French factors ({latest_covered}; "
+                f"Ken French lags ~1-2 months), and estimating factors cross-"
+                f"sectionally needs more tickers than factors. Add more tickers, "
+                f"or choose a date on or before {latest_covered}."
             )
         raise ValueError(f"No ticker had any observation across dates {date_list}.")
     return pl.concat(frames).select(
@@ -380,33 +403,132 @@ def get_residuals(
         _RESIDUAL_COLUMN,
         _ZSCORE_COLUMN,
         _PVALUE_COLUMN,
+        _ESTIMATED_COLUMN,
     )
+
+
+# A residual row: (ticker, spec name, residual, z-score, p-value, estimated?).
+_ResidualRecord = tuple[str, str, float, float, float, bool]
 
 
 def _residual_records(
     variables: Mapping[str, pl.DataFrame],
     target: dt.date,
     specification: FamaFrenchSpecification,
-) -> list[tuple[str, str, float, float, float]]:
-    """``(ticker, spec name, residual, z-score, p-value)`` rows for one spec.
+) -> list[_ResidualRecord]:
+    """``(ticker, spec name, residual, z-score, p-value, estimated)`` rows.
 
+    Uses the published factors when *target* is within Ken French's coverage;
+    otherwise the factors are estimated cross-sectionally from the basket (see
+    :func:`_estimated_residual_records`) and the row is flagged ``estimated``.
     The residual is standardized by *this spec's own* fitted idiosyncratic
-    volatility (``residual_std``), so the z-score and p-value are local to
-    the specification and must not be compared across specifications.
+    volatility (``residual_std``), so the z-score and p-value are local to the
+    specification and must not be compared across specifications.
     """
-    records: list[tuple[str, str, float, float, float]] = []
+    records: list[_ResidualRecord] = []
+    estimable: list[tuple[str, FamaFrenchResult, float]] = []
     for ticker, model in _fit(variables, specification).items():
         row = variables[ticker].filter(pl.col(OHLCHeader.TIMESTAMP).dt.date() == target)
         if row.height == 0:
             logger.warning("Skipping %s: no observation on %s", ticker, target)
             continue
+        excess = float(row[_EXCESS_RETURN_COLUMN_NAME][0])
+        factor_values = [row[factor][0] for factor in model.factors]
+        if any(value is None for value in factor_values):
+            # No published factor on this date -> estimate it cross-sectionally.
+            estimable.append((ticker, model, excess))
+            continue
         predicted = model.alpha + sum(
-            model.betas[factor] * float(row[factor][0]) for factor in model.factors
+            model.betas[factor] * float(value)
+            for factor, value in zip(model.factors, factor_values, strict=True)
         )
-        residual = float(row[_EXCESS_RETURN_COLUMN_NAME][0]) - predicted
+        residual = excess - predicted
         z_score, p_value = _residual_significance(residual, model.residual_std)
-        records.append((ticker, specification.name, residual, z_score, p_value))
+        records.append((ticker, specification.name, residual, z_score, p_value, False))
+    records.extend(_estimated_residual_records(estimable, specification, target))
     return records
+
+
+def _estimated_residual_records(
+    estimable: Sequence[tuple[str, FamaFrenchResult, float]],
+    specification: FamaFrenchSpecification,
+    target: dt.date,
+) -> list[_ResidualRecord]:
+    """Residuals for a date whose factors are estimated from the cross-section.
+
+    When Ken French hasn't published factors for *target* yet, estimate them
+    from the basket itself -- a cross-sectional OLS of each ticker's
+    excess-of-alpha return on its fitted loadings (see
+    :func:`_estimate_factor_returns`) -- then return ``excess - prediction``,
+    flagged ``estimated``. Identification needs more tickers than factors, and
+    a trustworthy estimate several per factor; both shortfalls are warned about,
+    and too few tickers yields no records.
+    """
+    if not estimable:
+        return []
+    factors = _FACTOR_MODELS[specification.factors_to_use]
+    n_tickers, n_factors = len(estimable), len(factors)
+    if n_tickers <= n_factors:
+        logger.warning(
+            "No published Fama-French factors on %s and only %d ticker(s) with "
+            "data -- need more than the %d factor(s) in %s to estimate them; "
+            "skipping these out-of-sample residuals.",
+            target,
+            n_tickers,
+            n_factors,
+            specification.name,
+        )
+        return []
+    logger.warning(
+        "No published Fama-French factors on %s; estimating them cross-"
+        "sectionally from %d ticker(s) for %s. The factors -- and these "
+        "residuals -- are estimates, not the canonical Ken French series.",
+        target,
+        n_tickers,
+        specification.name,
+    )
+    if n_tickers < _MEANINGFUL_TICKERS_PER_FACTOR * n_factors:
+        logger.warning(
+            "Only %d ticker(s) for a %d-factor estimate on %s (>= %d "
+            "recommended); too few samples for the estimate to be meaningful.",
+            n_tickers,
+            n_factors,
+            target,
+            _MEANINGFUL_TICKERS_PER_FACTOR * n_factors,
+        )
+    residuals = _estimate_factor_returns(estimable, factors)
+    return [
+        (
+            ticker,
+            specification.name,
+            residual,
+            *_residual_significance(residual, model.residual_std),
+            True,
+        )
+        for (ticker, model, _), residual in zip(estimable, residuals, strict=True)
+    ]
+
+
+def _estimate_factor_returns(
+    estimable: Sequence[tuple[str, FamaFrenchResult, float]],
+    factors: Sequence[str],
+) -> list[float]:
+    """Cross-sectional residuals after estimating the date's factor returns.
+
+    With known loadings ``B`` (N x K) and realized excess-of-alpha returns
+    ``y`` (N), the date's factor returns ``f`` solve ``min_f ||y - B f||`` (OLS,
+    no intercept -- alpha is already netted out); the returned residuals are
+    ``y - B f``. Caller guarantees ``N > K`` for a non-degenerate fit.
+    """
+    response = np.array(
+        [excess - model.alpha for _, model, excess in estimable], dtype=float
+    )
+    loadings = np.array(
+        [[model.betas[factor] for factor in factors] for _, model, _ in estimable],
+        dtype=float,
+    )
+    factor_returns, *_ = np.linalg.lstsq(loadings, response, rcond=None)
+    return (response - loadings @ factor_returns).tolist()
 
 
 @dataclass(frozen=True)

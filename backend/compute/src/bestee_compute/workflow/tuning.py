@@ -725,18 +725,26 @@ class FamaFrenchTuning:
 
     def ff_residuals_table(self) -> pl.DataFrame:
         """``ff_residuals`` aspect: long ``[date, ticker, specification, residual,
-        p_value]``.
+        p_value, estimated]``.
 
         ``p_value`` is the two-sided tail probability of the standardized
         out-of-sample residual; it is **local to each specification** (hence the
         ``specification`` column) and must not be compared across them.
+        ``estimated`` is ``True`` when that date's Fama-French factors were
+        estimated cross-sectionally (no published factors yet) rather than taken
+        from Ken French -- treat those residuals as approximate.
         """
-        return self.oos_residuals.select(
+        frame = self.oos_residuals
+        # Tolerate results persisted before the estimated-factor feature.
+        if "Estimated" not in frame.columns:
+            frame = frame.with_columns(pl.lit(False).alias("Estimated"))
+        return frame.select(
             pl.col("Date").alias("date"),
             pl.col("Ticker").alias("ticker"),
             pl.col("Specification").alias("specification"),
             pl.col("Residual").alias("residual"),
             pl.col("PValue").alias("p_value"),
+            pl.col("Estimated").alias("estimated"),
         ).sort(["specification", "date", "ticker"])
 
     def save(self, path: Path) -> None:

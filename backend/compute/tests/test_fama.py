@@ -79,6 +79,49 @@ def _spec(
     )
 
 
+def _estimation_panel(
+    n_tickers: int, *, n: int = 400, seed: int = 0
+) -> tuple[dict[str, pl.DataFrame], str, str]:
+    """Per-ticker frames sharing in-sample factor realizations, each with one
+    trailing out-of-sample row whose factor columns are null (unpublished).
+
+    Each ticker has its own independent loadings (so the cross-section spans the
+    factor space) and the OOS excess returns follow the same factor model on a
+    shared, unobserved factor draw -- exactly what the estimator must recover.
+
+    Returns ``(variables, in_sample_end_iso, oos_date_iso)``.
+    """
+    rng = np.random.default_rng(seed)
+    dates = _weekdays(n)
+    oos_date = dates[-1] + dt.timedelta(days=3)
+    shared = {f: rng.normal(0.0, 0.01, n) for f in FAMA_FRENCH_6_FACTORS}
+    oos_factor = {f: float(rng.normal(0.0, 0.01)) for f in FAMA_FRENCH_6_FACTORS}
+    variables: dict[str, pl.DataFrame] = {}
+    for i in range(n_tickers):
+        betas = {
+            f: _BETAS[f] + float(rng.normal(0.0, 0.3)) for f in FAMA_FRENCH_6_FACTORS
+        }
+        alpha = 1e-4 * (i + 1)
+        in_sample = (
+            alpha
+            + sum(betas[f] * shared[f] for f in FAMA_FRENCH_6_FACTORS)
+            + rng.normal(0.0, 0.002, n)
+        )
+        oos_excess = (
+            alpha
+            + sum(betas[f] * oos_factor[f] for f in FAMA_FRENCH_6_FACTORS)
+            + float(rng.normal(0.0, 0.002))
+        )
+        variables[f"T{i}"] = pl.DataFrame(
+            {
+                TS: [*dates, oos_date],
+                "ExcessReturn": [*in_sample.tolist(), oos_excess],
+                **{f: [*shared[f].tolist(), None] for f in FAMA_FRENCH_6_FACTORS},
+            }
+        )
+    return variables, dates[-1].date().isoformat(), oos_date.date().isoformat()
+
+
 class TestParseDailyFactorCsv:
     def test_parses_data_rows_scales_and_nulls_missing(self) -> None:
         text = "\n".join(
@@ -388,9 +431,12 @@ class TestGetResiduals:
             "Residual",
             "ZScore",
             "PValue",
+            "Estimated",
         ]
         assert residuals["Ticker"].to_list() == ["AAA"]
         assert residuals["Specification"].to_list() == [spec.name]
+        # The target is within factor coverage -> published, not estimated.
+        assert residuals["Estimated"].to_list() == [False]
         # residual = actual excess - model prediction on the target date.
         row = frame.filter(pl.col(TS).dt.date() == target.date())
         predicted = model.alpha + sum(model.betas[f] * row[f][0] for f in model.factors)
@@ -426,14 +472,60 @@ class TestGetResiduals:
             end=dates[200].date().isoformat(),
             factors=3,
         )
-        # After the window AND past the data (and past the factor coverage) ->
-        # no row for any ticker, with actionable guidance on the latest date.
+        # After the window AND past the data: a lone ticker can't anchor a
+        # cross-sectional factor estimate, so the failure points at that.
         future = (dates[-1] + dt.timedelta(days=30)).date().isoformat()
         with patch(
             "bestee_compute.workflow.fama.get_variables", return_value={"AAA": frame}
         ):
-            with pytest.raises(ValueError, match="No Fama-French factor data"):
+            with pytest.raises(ValueError, match="more tickers than factors"):
                 fama.get_residuals(config, future, [spec])
+
+    def test_estimates_factors_cross_sectionally_when_unpublished(self) -> None:
+        # A basket large enough (10 > 6 factors) to estimate the OOS factors
+        # from the cross-section; residuals must match an independent OLS of
+        # excess-of-alpha returns on the fitted loadings, and be flagged.
+        variables, in_sample_end, oos = _estimation_panel(10, seed=11)
+        tickers = list(variables)
+        config = _config(tickers)
+        spec = _spec(start="2018-01-01", end=in_sample_end, factors=6)
+        with patch(
+            "bestee_compute.workflow.fama.get_variables", return_value=variables
+        ):
+            residuals = fama.get_residuals(config, oos, [spec])
+            models = fama.fit_model(config, spec)
+
+        assert residuals.height == len(tickers)
+        assert residuals["Estimated"].to_list() == [True] * len(tickers)
+        # Independent cross-sectional OLS: f_hat = argmin ||y - B f||, residual
+        # = y - B f_hat, with y_i = excess_i - alpha_i and B the fitted betas.
+        factors = _FACTOR_MODELS[6]
+        oos_date = dt.date.fromisoformat(oos)
+        y = np.array(
+            [
+                variables[t].filter(pl.col(TS).dt.date() == oos_date)["ExcessReturn"][0]
+                - models[t].alpha
+                for t in tickers
+            ]
+        )
+        betas = np.array([[models[t].betas[f] for f in factors] for t in tickers])
+        f_hat, *_ = np.linalg.lstsq(betas, y, rcond=None)
+        expected = dict(zip(tickers, (y - betas @ f_hat).tolist()))
+        actual = {r["Ticker"]: r["Residual"] for r in residuals.iter_rows(named=True)}
+        for ticker in tickers:
+            assert actual[ticker] == pytest.approx(expected[ticker], abs=1e-9)
+
+    def test_estimation_needs_more_tickers_than_factors(self) -> None:
+        # 3 tickers < 6 factors -> the cross-sectional estimate is unidentified;
+        # no residuals, with a message pointing at the basket size.
+        variables, in_sample_end, oos = _estimation_panel(3, seed=12)
+        config = _config(list(variables))
+        spec = _spec(start="2018-01-01", end=in_sample_end, factors=6)
+        with patch(
+            "bestee_compute.workflow.fama.get_variables", return_value=variables
+        ):
+            with pytest.raises(ValueError, match="more tickers than factors"):
+                fama.get_residuals(config, oos, [spec])
 
     def test_one_row_per_ticker(self) -> None:
         frame_a = _factor_frame(n=400, seed=4)
