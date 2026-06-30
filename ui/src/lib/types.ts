@@ -30,6 +30,23 @@ export type Job = {
   updatedAt: number;
 };
 
+/** The full record of one job (its "log"), from `GET /jobs/{task_id}`. */
+export type JobDetail = {
+  taskId: string;
+  schemaId: string;
+  /** Raw Celery state (PENDING, STARTED, SUCCESS, FAILURE, ...). */
+  state: string;
+  status: JobStatus;
+  payload: Record<string, unknown> | null;
+  resultId: string | null;
+  createdAt: string | null;
+  startedAt: string | null;
+  finishedAt: string | null;
+  elapsedSeconds: number | null;
+  error: string | null;
+  traceback: string | null;
+};
+
 /** One analysis-specific result aspect, as returned by `GET /results/{id}/{aspect}`. */
 export type ResultTable = {
   resultId: string;

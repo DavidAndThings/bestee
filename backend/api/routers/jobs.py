@@ -135,10 +135,13 @@ def get_job(task_id: str) -> TaskStatus:
     elapsed = _compute_elapsed(started_at, finished_at, state)
     result_id = record.get("result_id")
     error: str | None = None
+    traceback: str | None = None
     if state == "SUCCESS":
         result_id = _result_id(result.result) or result_id
     elif state == "FAILURE":
         error = str(result.result)
+        raw_tb = result.traceback
+        traceback = raw_tb if isinstance(raw_tb, str) else None
     return TaskStatus(
         task_id=task_id,
         state=state,
@@ -147,6 +150,7 @@ def get_job(task_id: str) -> TaskStatus:
         payload=record.get("payload"),
         created_at=record.get("created_at"),
         error=error,
+        traceback=traceback,
         started_at=started_at,
         finished_at=finished_at,
         elapsed_seconds=elapsed,

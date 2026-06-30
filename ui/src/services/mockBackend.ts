@@ -1,4 +1,11 @@
-import type { Job, ResultTable, SicCode, SicTicker } from "../lib/types";
+import type {
+  Job,
+  JobDetail,
+  JobStatus,
+  ResultTable,
+  SicCode,
+  SicTicker,
+} from "../lib/types";
 
 /**
  * A stand-in for a real backend. Jobs are persisted to localStorage, namespaced
@@ -170,6 +177,57 @@ export function submitJob(
     payload: input.payload,
   });
   return delay({ ok: true, requestId, resultId, receivedAt: now }, 900);
+}
+
+const STATE_FOR_STATUS: Record<JobStatus, string> = {
+  queued: "PENDING",
+  running: "STARTED",
+  completed: "SUCCESS",
+  failed: "FAILURE",
+};
+
+/** Find a stored job by id across every user's bucket (mock has no auth scope). */
+function findJob(taskId: string): Job | null {
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i);
+    if (!key || !key.startsWith(JOBS_PREFIX)) continue;
+    try {
+      const parsed = JSON.parse(localStorage.getItem(key) ?? "[]") as Job[];
+      const found = Array.isArray(parsed)
+        ? parsed.find((job) => job.id === taskId)
+        : undefined;
+      if (found) return found;
+    } catch {
+      // Ignore unparseable buckets.
+    }
+  }
+  return null;
+}
+
+/** Return one job's full record (its log), derived from the stored mock job. */
+export function getJob(taskId: string): Promise<JobDetail> {
+  const job = findJob(taskId);
+  const done = job?.status === "completed" || job?.status === "failed";
+  const detail: JobDetail = {
+    taskId,
+    schemaId: job?.schemaId ?? "",
+    state: job ? STATE_FOR_STATUS[job.status] : "PENDING",
+    status: job?.status ?? "queued",
+    payload: job?.payload ?? null,
+    resultId: job?.resultId ?? null,
+    createdAt: job ? new Date(job.createdAt).toISOString() : null,
+    startedAt: job ? new Date(job.createdAt + 1500).toISOString() : null,
+    finishedAt: job && done ? new Date(job.updatedAt).toISOString() : null,
+    elapsedSeconds:
+      job && done ? Math.max(0, (job.updatedAt - job.createdAt) / 1000) : null,
+    error:
+      job?.status === "failed" ? "The job failed during processing." : null,
+    traceback:
+      job?.status === "failed"
+        ? "Traceback (most recent call last):\n  RuntimeError: simulated failure"
+        : null,
+  };
+  return delay(detail, 200);
 }
 
 /** Canned aspect tables so the Job Status "view table" links work in mock mode. */

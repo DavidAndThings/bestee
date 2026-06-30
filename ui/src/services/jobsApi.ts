@@ -1,13 +1,20 @@
 import * as httpBackend from "./httpBackend";
 import * as mockBackend from "./mockBackend";
 import type { SubmitJobInput, SubmitJobResult } from "./mockBackend";
-import type { Job, ResultTable, SicCode, SicTicker } from "../lib/types";
+import type {
+  Job,
+  JobDetail,
+  ResultTable,
+  SicCode,
+  SicTicker,
+} from "../lib/types";
 
 export type { SubmitJobInput, SubmitJobResult } from "./mockBackend";
 
 /** The data-layer contract shared by the mock and the real HTTP backend. */
 type JobsBackend = {
   listJobs(userId: string): Promise<Job[]>;
+  getJob(taskId: string): Promise<JobDetail>;
   submitJob(userId: string, input: SubmitJobInput): Promise<SubmitJobResult>;
   getResultAspect(resultId: string, aspect: string): Promise<ResultTable>;
   search(query: string, limit?: number): Promise<string[]>;
@@ -28,6 +35,10 @@ const backend: JobsBackend = import.meta.env.VITE_API_BASE_URL
 export const jobsApi = {
   listJobs(userId: string): Promise<Job[]> {
     return backend.listJobs(userId);
+  },
+  /** Fetch one job's full record (its log) by task id. */
+  getJob(taskId: string): Promise<JobDetail> {
+    return backend.getJob(taskId);
   },
   submitJob(userId: string, input: SubmitJobInput): Promise<SubmitJobResult> {
     return backend.submitJob(userId, input);

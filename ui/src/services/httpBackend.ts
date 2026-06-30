@@ -1,5 +1,6 @@
 import type {
   Job,
+  JobDetail,
   JobStatus,
   ResultTable,
   SicCode,
@@ -43,7 +44,7 @@ const SCHEMA_FOR_ANALYSIS: Record<string, string> = {
   fama_french: "fama-french",
 };
 
-/** One job as returned by `GET /jobs` (`TaskStatus`). */
+/** One job as returned by `GET /jobs[/ {task_id}]` (`TaskStatus`). */
 type ApiJobStatus = {
   task_id: string;
   state: string;
@@ -51,8 +52,18 @@ type ApiJobStatus = {
   analysis?: string | null;
   payload?: Record<string, unknown> | null;
   created_at?: string | null;
+  started_at?: string | null;
   finished_at?: string | null;
+  elapsed_seconds?: number | null;
+  error?: string | null;
+  traceback?: string | null;
 };
+
+/** API `analysis` -> UI schema id (the result-id prefix, not the route). */
+function schemaForAnalysis(analysis: string | null | undefined): string {
+  if (!analysis) return "";
+  return SCHEMA_FOR_ANALYSIS[analysis] ?? analysis;
+}
 
 /** The `GET /jobs` page envelope (`JobsPage`). */
 type ApiJobsPage = {
@@ -127,9 +138,7 @@ export async function listJobs(userId: string): Promise<Job[]> {
     return {
       id: item.task_id,
       userId,
-      schemaId: item.analysis
-        ? (SCHEMA_FOR_ANALYSIS[item.analysis] ?? item.analysis)
-        : "",
+      schemaId: schemaForAnalysis(item.analysis),
       status: toStatus(item.state),
       payload: item.payload ?? {},
       resultId: item.result_id ?? undefined,
@@ -137,6 +146,31 @@ export async function listJobs(userId: string): Promise<Job[]> {
       updatedAt: Number.isNaN(finished) ? createdAt : finished,
     };
   });
+}
+
+export async function getJob(taskId: string): Promise<JobDetail> {
+  const response = await fetch(
+    `${API_BASE_URL}/jobs/${encodeURIComponent(taskId)}`,
+    { headers: await authHeaders() },
+  );
+  if (!response.ok) {
+    throw new Error(`Failed to load job (${response.status})`);
+  }
+  const item = (await response.json()) as ApiJobStatus;
+  return {
+    taskId: item.task_id,
+    schemaId: schemaForAnalysis(item.analysis),
+    state: item.state,
+    status: toStatus(item.state),
+    payload: item.payload ?? null,
+    resultId: item.result_id ?? null,
+    createdAt: item.created_at ?? null,
+    startedAt: item.started_at ?? null,
+    finishedAt: item.finished_at ?? null,
+    elapsedSeconds: item.elapsed_seconds ?? null,
+    error: item.error ?? null,
+    traceback: item.traceback ?? null,
+  };
 }
 
 /** One result aspect as returned by `GET /results/{id}/{aspect}` (`ResultTable`). */

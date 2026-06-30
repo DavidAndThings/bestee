@@ -246,12 +246,16 @@ def test_submit_422_when_resolution_below_cluster_minimum() -> None:
 
 
 def _mock_async_result(
-    state: str, result: Any = None, date_done: datetime | None = None
+    state: str,
+    result: Any = None,
+    date_done: datetime | None = None,
+    traceback: str | None = None,
 ) -> MagicMock:
     ar = MagicMock()
     ar.state = state
     ar.result = result
     ar.date_done = date_done
+    ar.traceback = traceback
     return ar
 
 
@@ -285,7 +289,11 @@ def test_poll_surfaces_result_id_on_success() -> None:
 
 
 def test_poll_returns_error_when_failed() -> None:
-    ar = _mock_async_result("FAILURE", result=ValueError("boom"))
+    ar = _mock_async_result(
+        "FAILURE",
+        result=ValueError("boom"),
+        traceback="Traceback (most recent call last):\n  ValueError: boom",
+    )
     with (
         patch("celery_client.AsyncResult", return_value=ar),
         patch("routers.jobs.get_task_start_times", return_value={}),
@@ -295,6 +303,7 @@ def test_poll_returns_error_when_failed() -> None:
     payload = response.json()
     assert payload["state"] == "FAILURE"
     assert payload["error"] == "boom"
+    assert "ValueError: boom" in payload["traceback"]
 
 
 def test_poll_returns_state_only_when_pending() -> None:

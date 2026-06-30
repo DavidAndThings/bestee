@@ -15,6 +15,10 @@ export type ButtonVariant =
 
 export type FieldType = "string" | "integer" | "date" | "array";
 
+/** One result view an analysis produces: its `GET /results/{id}/{name}` aspect
+ *  name plus a human label for the Job Status link. */
+export type ResultAspect = { name: string; label: string };
+
 export type FieldDef = {
   type: FieldType;
   description: string;
@@ -44,11 +48,11 @@ export type Schema = {
   imageUrl?: string;
   buttonVariant?: ButtonVariant;
   /**
-   * The result aspect this analysis produces, served as a table at
-   * `GET /results/{result_id}/{aspect}`. Drives the "view table" link shown on
-   * the Job Status page once a job completes.
+   * The result aspects this analysis produces, each served as a table at
+   * `GET /results/{result_id}/{aspect.name}`. The Job Status page renders one
+   * link per aspect (labelled `aspect.label`) once a job completes.
    */
-  aspect?: string;
+  aspects?: ResultAspect[];
   /**
    * Ordered map of field definitions. Insertion order determines the order in
    * which fields are rendered in the chart setup form.
@@ -73,7 +77,7 @@ const RELATIVE_ROTATION_GRAPH_SCHEMA: Schema = {
   name: "Relative Rotation Graph",
   description: "The relative rotation graph for a given set of securities.",
   badge: "Markets",
-  aspect: "coordinates",
+  aspects: [{ name: "coordinates", label: "RS / momentum coordinates" }],
   imageUrl: server,
   buttonVariant: "btn-primary",
   parameters: {
@@ -209,7 +213,7 @@ const SPECTRAL_CLUSTERING_SCHEMA: Schema = {
   description:
     "Group securities into clusters by their residual (market-neutral) co-movement.",
   badge: "Clustering",
-  aspect: "cluster_label",
+  aspects: [{ name: "cluster_label", label: "Cluster labels" }],
   imageUrl: computer,
   buttonVariant: "btn-accent",
   parameters: {
@@ -272,7 +276,7 @@ const REGIME_DETECTION_SCHEMA: Schema = {
   description:
     "Label each security's history into market regimes (e.g. calm vs. turbulent).",
   badge: "Markets",
-  aspect: "regime_label",
+  aspects: [{ name: "regime_label", label: "Regime labels" }],
   imageUrl: pencil,
   buttonVariant: "btn-info",
   parameters: {
@@ -333,7 +337,7 @@ const FAMA_FRENCH_SCHEMA: Schema = {
   description:
     "Fit a Fama-French factor regression for each security over an estimation window.",
   badge: "Factors",
-  aspect: "ff_residuals",
+  aspects: [{ name: "ff_residuals", label: "Out-of-sample residuals" }],
   imageUrl: nokia,
   buttonVariant: "btn-success",
   parameters: {

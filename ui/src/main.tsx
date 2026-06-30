@@ -10,6 +10,7 @@ import SignUpPage from "./pages/SignUpPage.tsx";
 import AccountPage from "./pages/AccountPage.tsx";
 import ChartSetupPage from "./pages/ChartSetupPage.tsx";
 import JobsPage from "./pages/JobsPage.tsx";
+import JobLogPage from "./pages/JobLogPage.tsx";
 import ResultTablePage from "./pages/ResultTablePage.tsx";
 import SicCodesPage from "./pages/SicCodesPage.tsx";
 import NotFoundPage from "./pages/NotFoundPage.tsx";
@@ -41,6 +42,7 @@ createRoot(document.getElementById("root")!).render(
             <Route element={<RequireAuth />}>
               <Route path="charts/:schemaId" element={<ChartSetupPage />} />
               <Route path="jobs" element={<JobsPage />} />
+              <Route path="jobs/:taskId" element={<JobLogPage />} />
               <Route
                 path="results/:resultId/:aspect"
                 element={<ResultTablePage />}

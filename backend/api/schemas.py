@@ -34,6 +34,8 @@ class TaskStatus(BaseModel):
     payload: dict[str, Any] | None = None
     created_at: str | None = None
     error: str | None = None
+    # Full failure traceback, populated only by the single-job poll (the log).
+    traceback: str | None = None
     started_at: str | None = None
     finished_at: str | None = None
     elapsed_seconds: float | None = None

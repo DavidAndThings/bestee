@@ -7,9 +7,6 @@ import { relativeTime } from "../lib/format";
 import { useJobs } from "../hooks/useJobs";
 import { jobsApi } from "../services/jobsApi";
 import refreshIcon from "../assets/icons/refresh.svg";
-import cancelIcon from "../assets/icons/cancel.svg";
-import infoIcon from "../assets/icons/info.svg";
-import redoIcon from "../assets/icons/redo.svg";
 
 const STATUS_BADGE: Record<JobStatus, { label: string; className: string }> = {
   queued: { label: "Queued", className: "badge-ghost" },
@@ -18,9 +15,9 @@ const STATUS_BADGE: Record<JobStatus, { label: string; className: string }> = {
   failed: { label: "Failed", className: "badge-error" },
 };
 
-/** View table / Detail / Redo / Cancel action buttons.  Shared by the desktop
- *  table row and the mobile card so we don't drift the per-status logic. */
-function JobActions({
+/** One collapsible job row. The header summarises the job; expanding it reveals
+ *  the job-log link, one link per result aspect (once completed), and Redo. */
+function JobItem({
   job,
   onResubmit,
   resubmittingId,
@@ -29,60 +26,64 @@ function JobActions({
   onResubmit: (job: Job) => void;
   resubmittingId: string | null;
 }) {
-  const aspect = getSchema(job.schemaId)?.aspect;
-  // The result table only exists once the job completes; the result id is known
-  // from submit time, so the link is ready the moment the status flips.
-  const tableHref =
-    job.status === "completed" && job.resultId && aspect
-      ? `/results/${job.resultId}/${aspect}`
-      : null;
+  const schema = getSchema(job.schemaId);
+  const toolName = schema?.name ?? job.schemaId;
+  const aspects = schema?.aspects ?? [];
+  const badge = STATUS_BADGE[job.status];
   const resubmitting = resubmittingId === job.id;
   const busy = resubmittingId !== null;
+  // The result tables only exist once the job completes; the result id is known
+  // from submit time, so each aspect link is ready the moment the status flips.
+  const showAspects = job.status === "completed" && Boolean(job.resultId);
+
   return (
-    <div className="flex flex-nowrap items-center justify-end gap-2">
-      {tableHref && (
-        <Link to={tableHref} className="btn btn-outline btn-xs">
-          View table
-        </Link>
-      )}
-      {job.status !== "queued" && (
-        <div className="tooltip tooltip-left" data-tip="Details">
+    <details className="collapse-arrow bg-base-100 border-base-300 rounded-box collapse border">
+      <summary className="collapse-title">
+        <div className="flex items-center justify-between gap-3 pr-4">
+          <div className="min-w-0">
+            <p className="truncate font-semibold">{toolName}</p>
+            <p className="text-base-content/60 mt-0.5 text-xs">
+              {relativeTime(job.createdAt)} ·{" "}
+              <span className="font-mono" title={job.id}>
+                {job.id.slice(0, 8)}…
+              </span>
+            </p>
+          </div>
+          <span className={`badge shrink-0 ${badge.className}`}>
+            {badge.label}
+          </span>
+        </div>
+      </summary>
+      <div className="collapse-content">
+        <div className="flex flex-wrap items-center gap-2">
+          <Link to={`/jobs/${job.id}`} className="btn btn-outline btn-xs">
+            Job log
+          </Link>
+          {showAspects &&
+            aspects.map((aspect) => (
+              <Link
+                key={aspect.name}
+                to={`/results/${job.resultId}/${aspect.name}`}
+                className="btn btn-outline btn-xs"
+              >
+                {aspect.label}
+              </Link>
+            ))}
           <button
             type="button"
-            className="btn btn-ghost btn-circle btn-sm"
-            aria-label="Details"
+            className="btn btn-ghost btn-xs"
+            onClick={() => onResubmit(job)}
+            disabled={busy}
           >
-            <img src={infoIcon} alt="" className="size-6" />
+            {resubmitting ? (
+              <span className="loading loading-spinner loading-xs" />
+            ) : (
+              "Redo"
+            )}
           </button>
         </div>
-      )}
-      <div className="tooltip tooltip-left" data-tip="Redo">
-        <button
-          type="button"
-          className="btn btn-ghost btn-circle btn-sm"
-          aria-label="Redo"
-          onClick={() => onResubmit(job)}
-          disabled={busy}
-        >
-          {resubmitting ? (
-            <span className="loading loading-spinner loading-sm" />
-          ) : (
-            <img src={redoIcon} alt="" className="size-6" />
-          )}
-        </button>
       </div>
-      {(job.status === "queued" || job.status === "running") && (
-        <div className="tooltip tooltip-left" data-tip="Cancel">
-          <button
-            type="button"
-            className="btn btn-ghost btn-circle btn-sm"
-            aria-label="Cancel"
-          >
-            <img src={cancelIcon} alt="" className="size-6" />
-          </button>
-        </div>
-      )}
-    </div>
+    </details>
   );
 }
 
@@ -129,12 +130,10 @@ function JobsPage() {
 
   return (
     <div className="p-4 sm:p-8">
-      <div className="mx-auto max-w-6xl">
-        <div className="mb-6 px-4">
+      <div className="mx-auto max-w-4xl">
+        <div className="mb-6 px-1">
           <div className="flex items-center justify-between gap-4">
-            <div>
-              <h1 className="text-2xl font-semibold sm:text-3xl">Job Status</h1>
-            </div>
+            <h1 className="text-2xl font-semibold sm:text-3xl">Job Status</h1>
             <div className="tooltip tooltip-left" data-tip="Refresh">
               <button
                 type="button"
@@ -161,90 +160,16 @@ function JobsPage() {
             </Link>
           </div>
         ) : (
-          <>
-            {/* Mobile: card-per-row.  The desktop table doesn't fit
-             *  under ~700px once the UUID + actions are in. */}
-            <ul className="space-y-3 md:hidden">
-              {jobs.map((job) => {
-                const status = STATUS_BADGE[job.status];
-                const toolName = getSchema(job.schemaId)?.name ?? job.schemaId;
-                return (
-                  <li
-                    key={job.id}
-                    className="bg-base-100 border-base-300 rounded-box border p-4 shadow-sm"
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className="font-semibold">{toolName}</p>
-                        <p
-                          className="text-base-content/60 mt-1 font-mono text-xs"
-                          title={job.id}
-                        >
-                          {job.id.slice(0, 8)}…
-                        </p>
-                        <p className="text-base-content/60 mt-1 text-sm">
-                          {relativeTime(job.createdAt)}
-                        </p>
-                      </div>
-                      <span className={`badge shrink-0 ${status.className}`}>
-                        {status.label}
-                      </span>
-                    </div>
-                    <div className="mt-3 flex justify-end">
-                      <JobActions
-                        job={job}
-                        onResubmit={handleResubmit}
-                        resubmittingId={resubmittingId}
-                      />
-                    </div>
-                  </li>
-                );
-              })}
-            </ul>
-
-            {/* Desktop: tabular view. */}
-            <div className="hidden overflow-x-auto md:block">
-              <table className="table">
-                <thead>
-                  <tr>
-                    <th>Job ID</th>
-                    <th>Tool</th>
-                    <th>Status</th>
-                    <th>Submitted</th>
-                    <th></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {jobs.map((job) => {
-                    const status = STATUS_BADGE[job.status];
-                    const toolName =
-                      getSchema(job.schemaId)?.name ?? job.schemaId;
-                    return (
-                      <tr key={job.id}>
-                        <td className="font-mono text-xs">{job.id}</td>
-                        <td>{toolName}</td>
-                        <td>
-                          <span className={`badge ${status.className}`}>
-                            {status.label}
-                          </span>
-                        </td>
-                        <td className="text-base-content/60 whitespace-nowrap">
-                          {relativeTime(job.createdAt)}
-                        </td>
-                        <td className="text-right">
-                          <JobActions
-                            job={job}
-                            onResubmit={handleResubmit}
-                            resubmittingId={resubmittingId}
-                          />
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </>
+          <div className="space-y-3">
+            {jobs.map((job) => (
+              <JobItem
+                key={job.id}
+                job={job}
+                onResubmit={handleResubmit}
+                resubmittingId={resubmittingId}
+              />
+            ))}
+          </div>
         )}
 
         {feedback && (
