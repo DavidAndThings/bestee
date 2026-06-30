@@ -45,6 +45,15 @@ export type Job = {
   updatedAt: number;
 };
 
+/** One page of a user's jobs, mirroring the API's paginated `GET /jobs`. */
+export type JobsPage = {
+  jobs: Job[];
+  /** Total jobs the user has (across all pages), for the page count. */
+  total: number;
+  offset: number;
+  limit: number;
+};
+
 /** The full record of one job (its "log"), from `GET /jobs/{task_id}`. */
 export type JobDetail = {
   taskId: string;

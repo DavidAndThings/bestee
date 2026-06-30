@@ -1,6 +1,7 @@
 import type {
   Job,
   JobDetail,
+  JobsPage,
   JobStatus,
   ResultTable,
   SearchResult,
@@ -124,15 +125,20 @@ export async function submitJob(
   };
 }
 
-export async function listJobs(userId: string): Promise<Job[]> {
-  const response = await fetch(`${API_BASE_URL}/jobs?limit=100`, {
-    headers: await authHeaders(),
-  });
+export async function listJobs(
+  userId: string,
+  offset = 0,
+  limit = 50,
+): Promise<JobsPage> {
+  const response = await fetch(
+    `${API_BASE_URL}/jobs?offset=${offset}&limit=${limit}`,
+    { headers: await authHeaders() },
+  );
   if (!response.ok) {
     throw new Error(`Failed to load jobs (${response.status})`);
   }
   const data = (await response.json()) as ApiJobsPage;
-  return data.items.map((item): Job => {
+  const jobs = data.items.map((item): Job => {
     const parsedCreated = item.created_at ? Date.parse(item.created_at) : NaN;
     const createdAt = Number.isNaN(parsedCreated) ? Date.now() : parsedCreated;
     const finished = item.finished_at ? Date.parse(item.finished_at) : NaN;
@@ -147,6 +153,7 @@ export async function listJobs(userId: string): Promise<Job[]> {
       updatedAt: Number.isNaN(finished) ? createdAt : finished,
     };
   });
+  return { jobs, total: data.total, offset: data.offset, limit: data.limit };
 }
 
 export async function getJob(taskId: string): Promise<JobDetail> {

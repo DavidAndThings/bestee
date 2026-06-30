@@ -4,7 +4,7 @@ import { Link } from "react-router-dom";
 import { getSchema } from "../config/schemas";
 import type { Job, JobStatus } from "../lib/types";
 import { relativeTime } from "../lib/format";
-import { useJobs } from "../hooks/useJobs";
+import { JOBS_PAGE_SIZE, useJobs } from "../hooks/useJobs";
 import { jobsApi } from "../services/jobsApi";
 import refreshIcon from "../assets/icons/refresh.svg";
 
@@ -89,7 +89,18 @@ function JobItem({
 
 function JobsPage() {
   const { userId } = useAuth();
-  const { jobs, loading, refresh } = useJobs(userId);
+  const {
+    jobs,
+    loading,
+    refresh,
+    total,
+    page,
+    pageCount,
+    hasPrev,
+    hasNext,
+    nextPage,
+    prevPage,
+  } = useJobs(userId);
   const [resubmittingId, setResubmittingId] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<{
     kind: "success" | "error";
@@ -160,7 +171,11 @@ function JobsPage() {
             </Link>
           </div>
         ) : (
-          <div className="space-y-3">
+          <div
+            className={`space-y-3 transition-opacity ${
+              loading ? "opacity-60" : ""
+            }`}
+          >
             {jobs.map((job) => (
               <JobItem
                 key={job.id}
@@ -169,6 +184,36 @@ function JobsPage() {
                 resubmittingId={resubmittingId}
               />
             ))}
+          </div>
+        )}
+
+        {pageCount > 1 && (
+          <div className="mt-6 flex flex-col items-center justify-between gap-3 sm:flex-row">
+            <span className="text-base-content/60 text-sm">
+              Showing {(page - 1) * JOBS_PAGE_SIZE + 1}–
+              {(page - 1) * JOBS_PAGE_SIZE + jobs.length} of {total}
+            </span>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                className="btn btn-outline btn-sm"
+                onClick={prevPage}
+                disabled={!hasPrev || loading}
+              >
+                Previous
+              </button>
+              <span className="text-base-content/70 px-1 text-sm whitespace-nowrap">
+                Page {page} of {pageCount}
+              </span>
+              <button
+                type="button"
+                className="btn btn-outline btn-sm"
+                onClick={nextPage}
+                disabled={!hasNext || loading}
+              >
+                Next
+              </button>
+            </div>
           </div>
         )}
 

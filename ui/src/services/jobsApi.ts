@@ -2,8 +2,8 @@ import * as httpBackend from "./httpBackend";
 import * as mockBackend from "./mockBackend";
 import type { SubmitJobInput, SubmitJobResult } from "./mockBackend";
 import type {
-  Job,
   JobDetail,
+  JobsPage,
   ResultTable,
   SearchResult,
   SicCode,
@@ -14,7 +14,7 @@ export type { SubmitJobInput, SubmitJobResult } from "./mockBackend";
 
 /** The data-layer contract shared by the mock and the real HTTP backend. */
 type JobsBackend = {
-  listJobs(userId: string): Promise<Job[]>;
+  listJobs(userId: string, offset?: number, limit?: number): Promise<JobsPage>;
   getJob(taskId: string): Promise<JobDetail>;
   submitJob(userId: string, input: SubmitJobInput): Promise<SubmitJobResult>;
   getResultAspect(resultId: string, aspect: string): Promise<ResultTable>;
@@ -34,8 +34,9 @@ const backend: JobsBackend = import.meta.env.VITE_API_BASE_URL
  * live API based on configuration, without the pages or hooks needing to know.
  */
 export const jobsApi = {
-  listJobs(userId: string): Promise<Job[]> {
-    return backend.listJobs(userId);
+  /** One page of the user's jobs (newest first), with the total for paging. */
+  listJobs(userId: string, offset?: number, limit?: number): Promise<JobsPage> {
+    return backend.listJobs(userId, offset, limit);
   },
   /** Fetch one job's full record (its log) by task id. */
   getJob(taskId: string): Promise<JobDetail> {

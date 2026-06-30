@@ -1,6 +1,7 @@
 import type {
   Job,
   JobDetail,
+  JobsPage,
   JobStatus,
   ResultTable,
   SearchResult,
@@ -55,66 +56,43 @@ function mockResultId(schemaId: string): string {
   return `${prefix}_${hex}`;
 }
 
-/** Mock data: a handful of previously submitted jobs across tools/statuses. */
+/** Mock data: enough previously submitted jobs across tools/statuses to span a
+ *  few pages, so the pagination controls are exercised in standalone dev. */
 function createSeedJobs(userId: string): Job[] {
   const now = Date.now();
   const minute = 60_000;
-  const hour = 60 * minute;
-  const day = 24 * hour;
 
-  const make = (
-    schemaId: string,
-    status: Job["status"],
-    ago: number,
-    payload: Record<string, unknown>,
-  ): Job => ({
-    id: crypto.randomUUID(),
-    userId,
-    schemaId,
-    status,
-    payload,
-    resultId: mockResultId(schemaId),
-    createdAt: now - ago,
-    updatedAt: now - ago,
-  });
-
-  return [
-    make("relative-rotation-graph", "completed", 2 * day, {
-      securities: ["AAPL", "MSFT", "GOOG"],
-      lookback_window: 14,
-      lookback_period: "1w",
-      smoothing_method: "z-score",
-      smoothing_window: 5,
-    }),
-    make("portfolio-backtest", "completed", 5 * hour, {
-      portfolio_name: "Tech Core",
-      securities: ["AAPL", "NVDA"],
-      initial_capital: 100000,
-      rebalance_frequency: "monthly",
-      lookback_window: 60,
-    }),
-    make("relative-rotation-graph", "failed", 1 * day, {
-      securities: ["TSLA", "RIVN"],
-      lookback_window: 30,
-      lookback_period: "1d",
-      smoothing_method: "double-ema",
-      smoothing_window: 10,
-    }),
-    make("portfolio-backtest", "running", 20 * minute, {
-      portfolio_name: "Dividend Mix",
-      securities: ["JNJ", "KO", "PG"],
-      initial_capital: 50000,
-      rebalance_frequency: "quarterly",
-      lookback_window: 90,
-    }),
-    make("relative-rotation-graph", "queued", 3 * minute, {
-      securities: ["SPY", "QQQ", "IWM"],
-      lookback_window: 21,
-      lookback_period: "1w",
-      smoothing_method: "z-score",
-      smoothing_window: 7,
-    }),
+  const schemaIds = [
+    "relative-rotation-graph",
+    "spectral-clustering",
+    "regime-detection",
+    "fama-french",
   ];
+  const statuses: Job["status"][] = [
+    "completed",
+    "failed",
+    "running",
+    "queued",
+  ];
+
+  return Array.from({ length: 23 }, (_, i): Job => {
+    const schemaId = schemaIds[i % schemaIds.length];
+    const createdAt = now - (i + 1) * 37 * minute;
+    return {
+      id: crypto.randomUUID(),
+      userId,
+      schemaId,
+      status: statuses[i % statuses.length],
+      payload: {
+        tickers: ["AAPL", "MSFT", "GOOG"],
+        start_date: "2023-01-01",
+        end_date: "2024-12-31",
+      },
+      resultId: mockResultId(schemaId),
+      createdAt,
+      updatedAt: createdAt,
+    };
+  });
 }
 
 function ensureSeeded(userId: string): Job[] {
@@ -125,11 +103,16 @@ function ensureSeeded(userId: string): Job[] {
   return seeded;
 }
 
-export function listJobs(userId: string): Promise<Job[]> {
-  const jobs = ensureSeeded(userId)
+export function listJobs(
+  userId: string,
+  offset = 0,
+  limit = 50,
+): Promise<JobsPage> {
+  const all = ensureSeeded(userId)
     .slice()
     .sort((a, b) => b.createdAt - a.createdAt);
-  return delay(jobs);
+  const jobs = all.slice(offset, offset + limit);
+  return delay({ jobs, total: all.length, offset, limit });
 }
 
 export type SubmitJobInput = {
