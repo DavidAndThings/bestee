@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useAuth } from "@clerk/react";
 import { useNavigate } from "react-router-dom";
 import Card from "./components/Card";
-import { actionButtonClasses } from "./lib/badge";
+import { actionButtonClass } from "./lib/badge";
 import { SCHEMA_REGISTRY } from "./config/schemas";
 import pocketConsole from "./assets/gifs/pocket-console.gif";
 import paperMoney from "./assets/gifs/paper-money.gif";
@@ -122,16 +122,10 @@ function App() {
     (a, b) => orderedIds.indexOf(a.id) - orderedIds.indexOf(b.id),
   );
 
-  // Colour each card's CTA by its position so adjacent cards never share a
-  // button colour and no button matches its own badge (see lib/badge).
-  const buttonClasses = actionButtonClasses(
-    orderedCards.map((card) => card.badge),
-  );
-
   return (
     <div className="py-8">
       <div className="mx-auto grid w-full max-w-7xl grid-cols-1 gap-8 px-8 sm:grid-cols-2 lg:grid-cols-3">
-        {orderedCards.map((card, index) => (
+        {orderedCards.map((card) => (
           <Card
             key={card.id}
             title={card.title}
@@ -139,7 +133,7 @@ function App() {
             badge={card.badge}
             imageUrl={card.imageUrl}
             actionLabel={card.actionLabel}
-            buttonClass={buttonClasses[index]}
+            buttonClass={actionButtonClass(card.badge)}
             onAction={card.onAction}
             favourited={favourites.has(card.id)}
             onFavourite={() => toggleFavourite(card.id)}

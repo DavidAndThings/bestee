@@ -1,62 +1,33 @@
-/** Curated hue per category badge, tuned for the dark canvas. Because each
- *  card's action button is kept a different hue from its badge (see
- *  {@link actionButtonClasses}), these names double as the button hue to avoid.
- *  The matching colours live in index.css as `badge-soft-*` / `btn-solid-*`. */
-const BADGE_HUE: Record<string, string> = {
-  Analysis: "indigo",
-  Reference: "amber",
-  Monitoring: "emerald",
+/** Each category's curated two-tone combo on the dark canvas: a soft, tinted
+ *  badge plus a solid jewel-tone CTA button in a different, harmonious hue.
+ *  Cards that share a badge therefore share the same badge+button combo, so the
+ *  pairing reads as a category. The colours live in index.css as
+ *  `badge-soft-*` / `btn-solid-*`. */
+const CATEGORY_COMBO: Record<string, { badge: string; button: string }> = {
+  // Analogous cool: soft indigo tag, solid violet CTA.
+  Analysis: { badge: "indigo", button: "violet" },
+  // Warm tag, crisp cool CTA — amber pairs cleanly with a clean blue.
+  Reference: { badge: "amber", button: "blue" },
+  // Analogous green family: soft emerald tag, solid teal CTA.
+  Monitoring: { badge: "emerald", button: "teal" },
 };
 
-/** Hue name for a badge label (neutral for any unmapped one). */
-function badgeHue(badge: string): string {
-  return BADGE_HUE[badge] ?? "neutral";
+/** Fallback combo for any unmapped badge label. */
+const NEUTRAL_COMBO = { badge: "neutral", button: "indigo" };
+
+/** The badge+button hue combo for a label (neutral for any unmapped one). */
+function combo(badge: string | undefined): { badge: string; button: string } {
+  return (badge && CATEGORY_COMBO[badge]) || NEUTRAL_COMBO;
 }
 
 /** The soft, tinted badge class for a label (see `badge-soft-*` in index.css). */
 export function badgeClass(badge: string): string {
-  return `badge-soft-${badgeHue(badge)}`;
+  return `badge-soft-${combo(badge).badge}`;
 }
 
-/** Cohesive cool jewel-tone hues for the solid CTA buttons (see `btn-solid-*`
- *  in index.css), ordered so the rolling assignment reads as a harmonious
- *  spread rather than alternating two colours. */
-const BUTTON_HUES = [
-  "indigo",
-  "sky",
-  "violet",
-  "teal",
-  "blue",
-  "cyan",
-] as const;
-
-/**
- * Assign every card (given in render order, by its badge label) an action-button
- * colour class such that:
- *  - a card's button hue never matches its own badge hue, and
- *  - no two adjacent cards share a button hue.
- *
- * A rolling cursor walks {@link BUTTON_HUES}, taking the first hue that clears
- * both constraints; with six hues and at most two forbidden per card a choice
- * always exists, so the loop never falls back.
- */
-export function actionButtonClasses(badges: (string | undefined)[]): string[] {
-  const classes: string[] = [];
-  let previous: string | null = null;
-  let cursor = 0;
-  for (const badge of badges) {
-    const ownHue = badge ? badgeHue(badge) : null;
-    let chosen: string = BUTTON_HUES[cursor % BUTTON_HUES.length];
-    for (let step = 0; step < BUTTON_HUES.length; step += 1) {
-      const candidate = BUTTON_HUES[(cursor + step) % BUTTON_HUES.length];
-      if (candidate !== previous && candidate !== ownHue) {
-        chosen = candidate;
-        cursor = (cursor + step + 1) % BUTTON_HUES.length;
-        break;
-      }
-    }
-    classes.push(`btn-solid-${chosen}`);
-    previous = chosen;
-  }
-  return classes;
+/** The solid CTA button class for a card with the given badge label (see
+ *  `btn-solid-*` in index.css). Cards sharing a badge share the same button, so
+ *  the combo is consistent per category. */
+export function actionButtonClass(badge: string | undefined): string {
+  return `btn-solid-${combo(badge).button}`;
 }
