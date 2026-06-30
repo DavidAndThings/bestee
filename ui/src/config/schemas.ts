@@ -66,7 +66,7 @@ const RELATIVE_ROTATION_GRAPH_SCHEMA: Schema = {
   id: "relative-rotation-graph",
   name: "Relative Rotation Graph",
   description: "The relative rotation graph for a given set of securities.",
-  badge: "Rotation",
+  badge: "Analysis",
   aspects: [{ name: "coordinates", label: "RS / momentum coordinates" }],
   imageUrl: server,
   parameters: {
@@ -200,7 +200,7 @@ const SPECTRAL_CLUSTERING_SCHEMA: Schema = {
   name: "Spectral Clustering",
   description:
     "Group securities into clusters by their residual (market-neutral) co-movement.",
-  badge: "Clustering",
+  badge: "Analysis",
   aspects: [{ name: "cluster_label", label: "Cluster labels" }],
   imageUrl: computer,
   parameters: {
@@ -262,7 +262,7 @@ const REGIME_DETECTION_SCHEMA: Schema = {
   name: "Regime Detection",
   description:
     "Label each security's history into market regimes (e.g. calm vs. turbulent).",
-  badge: "Regimes",
+  badge: "Analysis",
   aspects: [{ name: "regime_label", label: "Regime labels" }],
   imageUrl: pencil,
   parameters: {
@@ -322,7 +322,7 @@ const FAMA_FRENCH_SCHEMA: Schema = {
   name: "Fama-French Factor Model",
   description:
     "Fit a Fama-French factor regression for each security over an estimation window.",
-  badge: "Factors",
+  badge: "Analysis",
   aspects: [{ name: "ff_residuals", label: "Out-of-sample residuals" }],
   imageUrl: nokia,
   parameters: {

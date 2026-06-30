@@ -109,7 +109,7 @@ function App() {
       id: "job-status",
       title: "Job Status",
       description: "Track the status of your submitted analysis jobs.",
-      badge: "Jobs",
+      badge: "Monitoring",
       imageUrl: pocketConsole,
       actionLabel: isSignedIn ? "View jobs" : "Sign in to view",
       onAction: () => navigateWithAuth("/jobs"),
