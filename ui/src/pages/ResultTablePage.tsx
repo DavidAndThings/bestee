@@ -45,7 +45,7 @@ function ResultTablePage() {
 
   return (
     <div className="p-4 sm:p-8">
-      <div className="mx-auto max-w-6xl">
+      <div className="mx-auto max-w-4xl">
         <div className="mb-6 flex items-start justify-between gap-4 px-1">
           <div className="min-w-0">
             <h1 className="text-2xl font-semibold capitalize sm:text-3xl">
