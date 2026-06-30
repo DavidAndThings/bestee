@@ -1,3 +1,5 @@
+import { badgeClass } from "../lib/badge";
+
 export type CardProps = {
   title: string;
   description: string;
@@ -77,7 +79,9 @@ function Card({
           </button>
         </div>
         {badge && (
-          <span className="badge badge-primary absolute top-3 right-3 shadow-sm">
+          <span
+            className={`badge ${badgeClass(badge)} absolute top-3 right-3 shadow-sm`}
+          >
             {badge}
           </span>
         )}

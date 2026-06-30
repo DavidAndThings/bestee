@@ -2,6 +2,7 @@ import { type FormEvent, useMemo, useState } from "react";
 import { useAuth } from "@clerk/react";
 import { Link, Navigate, useParams } from "react-router-dom";
 import { getSchema, type FieldDef, type FieldType } from "../config/schemas";
+import { badgeClass } from "../lib/badge";
 import { humanizeKey } from "../lib/format";
 import { jobsApi } from "../services/jobsApi";
 import DateField from "../components/DateField";
@@ -208,7 +209,9 @@ function ChartSetupPage() {
                   </p>
                 </div>
                 {schema.badge && (
-                  <span className="badge badge-primary badge-outline">
+                  <span
+                    className={`badge badge-outline ${badgeClass(schema.badge)}`}
+                  >
                     {schema.badge}
                   </span>
                 )}
