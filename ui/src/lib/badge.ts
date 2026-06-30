@@ -1,9 +1,10 @@
 /** daisyUI colour class per category badge, so each badge type reads as a
  *  distinct colour across the home cards and the chart-setup header. */
 const BADGE_CLASS: Record<string, string> = {
-  Markets: "badge-primary",
+  Rotation: "badge-primary",
   Clustering: "badge-secondary",
   Factors: "badge-accent",
+  Regimes: "badge-success",
   Reference: "badge-warning",
   Jobs: "badge-info",
   Training: "badge-neutral",

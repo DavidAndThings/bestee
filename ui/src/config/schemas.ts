@@ -66,7 +66,7 @@ const RELATIVE_ROTATION_GRAPH_SCHEMA: Schema = {
   id: "relative-rotation-graph",
   name: "Relative Rotation Graph",
   description: "The relative rotation graph for a given set of securities.",
-  badge: "Markets",
+  badge: "Rotation",
   aspects: [{ name: "coordinates", label: "RS / momentum coordinates" }],
   imageUrl: server,
   parameters: {
@@ -262,7 +262,7 @@ const REGIME_DETECTION_SCHEMA: Schema = {
   name: "Regime Detection",
   description:
     "Label each security's history into market regimes (e.g. calm vs. turbulent).",
-  badge: "Markets",
+  badge: "Regimes",
   aspects: [{ name: "regime_label", label: "Regime labels" }],
   imageUrl: pencil,
   parameters: {
