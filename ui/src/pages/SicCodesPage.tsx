@@ -84,7 +84,7 @@ export default function SicCodesPage() {
 
   return (
     <div className="p-4 sm:p-8">
-      <div className="mx-auto max-w-5xl">
+      <div className="mx-auto max-w-4xl">
         <div className="mb-6 px-1">
           <h1 className="text-2xl font-semibold sm:text-3xl">
             SIC Code Directory
