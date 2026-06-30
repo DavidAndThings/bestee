@@ -57,7 +57,7 @@ function JobItem({
             <img
               src={statusIcon}
               alt=""
-              className="size-9 shrink-0"
+              className="size-12 shrink-0"
               aria-hidden="true"
             />
             <div className="min-w-0">
