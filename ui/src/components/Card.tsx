@@ -6,14 +6,6 @@ export type CardProps = {
   badge?: string;
   imageUrl?: string;
   actionLabel?: string;
-  buttonVariant?:
-    | "btn-primary"
-    | "btn-secondary"
-    | "btn-accent"
-    | "btn-info"
-    | "btn-success"
-    | "btn-warning"
-    | "btn-error";
   onAction?: () => void;
   onFavourite?: () => void;
   favourited?: boolean;
@@ -25,7 +17,6 @@ function Card({
   badge,
   imageUrl,
   actionLabel = "Start",
-  buttonVariant = "btn-primary",
   onAction,
   onFavourite,
   favourited = false,
@@ -92,7 +83,9 @@ function Card({
         <div className="card-actions mt-2 justify-end">
           <button
             type="button"
-            className={`btn ${buttonVariant}`}
+            // The card action is the single, consistent primary CTA; category is
+            // conveyed by the colour-coded badge instead (see lib/badge).
+            className="btn btn-primary"
             onClick={() => onAction?.()}
           >
             {actionLabel}

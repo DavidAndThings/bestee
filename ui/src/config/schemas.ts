@@ -4,15 +4,6 @@ import computer from "../assets/gifs/computer.gif";
 import paperMoney from "../assets/gifs/paper-money.gif";
 import pencil from "../assets/gifs/pencil.gif";
 
-export type ButtonVariant =
-  | "btn-primary"
-  | "btn-secondary"
-  | "btn-accent"
-  | "btn-info"
-  | "btn-success"
-  | "btn-warning"
-  | "btn-error";
-
 export type FieldType = "string" | "integer" | "date" | "array";
 
 /** One result view an analysis produces: its `GET /results/{id}/{name}` aspect
@@ -46,7 +37,6 @@ export type Schema = {
   description: string;
   badge?: string;
   imageUrl?: string;
-  buttonVariant?: ButtonVariant;
   /**
    * The result aspects this analysis produces, each served as a table at
    * `GET /results/{result_id}/{aspect.name}`. The Job Status page renders one
@@ -79,7 +69,6 @@ const RELATIVE_ROTATION_GRAPH_SCHEMA: Schema = {
   badge: "Markets",
   aspects: [{ name: "coordinates", label: "RS / momentum coordinates" }],
   imageUrl: server,
-  buttonVariant: "btn-primary",
   parameters: {
     tickers: {
       type: "array",
@@ -139,7 +128,6 @@ const TRAINING_DATA_SELECTION_SCHEMA: Schema = {
     "Select the training data to use for model training. Currently this process is optimized for training on a random forest trading model.",
   badge: "Training",
   imageUrl: paperMoney,
-  buttonVariant: "btn-secondary",
   parameters: {
     lookback_window_start: {
       type: "date",
@@ -215,7 +203,6 @@ const SPECTRAL_CLUSTERING_SCHEMA: Schema = {
   badge: "Clustering",
   aspects: [{ name: "cluster_label", label: "Cluster labels" }],
   imageUrl: computer,
-  buttonVariant: "btn-accent",
   parameters: {
     tickers: {
       type: "array",
@@ -278,7 +265,6 @@ const REGIME_DETECTION_SCHEMA: Schema = {
   badge: "Markets",
   aspects: [{ name: "regime_label", label: "Regime labels" }],
   imageUrl: pencil,
-  buttonVariant: "btn-info",
   parameters: {
     tickers: {
       type: "array",
@@ -339,7 +325,6 @@ const FAMA_FRENCH_SCHEMA: Schema = {
   badge: "Factors",
   aspects: [{ name: "ff_residuals", label: "Out-of-sample residuals" }],
   imageUrl: nokia,
-  buttonVariant: "btn-success",
   parameters: {
     tickers: {
       type: "array",

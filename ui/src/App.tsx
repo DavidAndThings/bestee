@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useAuth } from "@clerk/react";
 import { useNavigate } from "react-router-dom";
 import Card from "./components/Card";
-import { SCHEMA_REGISTRY, type ButtonVariant } from "./config/schemas";
+import { SCHEMA_REGISTRY } from "./config/schemas";
 import pocketConsole from "./assets/gifs/pocket-console.gif";
 import paperMoney from "./assets/gifs/paper-money.gif";
 
@@ -12,7 +12,6 @@ type HomeCard = {
   description: string;
   badge?: string;
   imageUrl?: string;
-  buttonVariant?: ButtonVariant;
   actionLabel: string;
   onAction: () => void;
 };
@@ -93,7 +92,6 @@ function App() {
       description: schema.description,
       badge: schema.badge,
       imageUrl: schema.imageUrl,
-      buttonVariant: schema.buttonVariant,
       actionLabel: isSignedIn ? "Configure" : "Sign in to start",
       onAction: () => navigateWithAuth(`/charts/${schema.id}`),
     })),
@@ -104,7 +102,6 @@ function App() {
         "Browse SIC industry codes and the tickers classified under each.",
       badge: "Reference",
       imageUrl: paperMoney,
-      buttonVariant: "btn-warning",
       actionLabel: isSignedIn ? "Browse" : "Sign in to browse",
       onAction: () => navigateWithAuth("/sic"),
     },
@@ -114,7 +111,6 @@ function App() {
       description: "Track the status of your submitted analysis jobs.",
       badge: "Jobs",
       imageUrl: pocketConsole,
-      buttonVariant: "btn-info",
       actionLabel: isSignedIn ? "View jobs" : "Sign in to view",
       onAction: () => navigateWithAuth("/jobs"),
     },
@@ -135,7 +131,6 @@ function App() {
             description={card.description}
             badge={card.badge}
             imageUrl={card.imageUrl}
-            buttonVariant={card.buttonVariant}
             actionLabel={card.actionLabel}
             onAction={card.onAction}
             favourited={favourites.has(card.id)}
