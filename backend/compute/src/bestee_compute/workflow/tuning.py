@@ -838,7 +838,13 @@ def optimize_fama_french(
             best_mean_adj = mean_adj
 
     if best_factors is None:
-        raise ValueError("No Fama-French model could be fit on any interval.")
+        raise ValueError(
+            "No Fama-French model could be fit on any interval: none of the "
+            f"{len(request.tickers)} ticker(s) had enough overlapping daily "
+            "price and factor observations in any window (each fit needs more "
+            "rows than factors). Check the tickers have daily history over the "
+            "interval(s)."
+        )
 
     oos_residuals = fama.get_residuals(
         config, request.oos_dates, best_specs, variables=variables

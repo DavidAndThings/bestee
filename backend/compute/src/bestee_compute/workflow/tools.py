@@ -712,15 +712,25 @@ def column(
     config: AnalysisConfig,
     ohlc_column: OHLCHeader,
     ticker_class: TickerClass = "all",
+    *,
+    drop_missing: bool = True,
 ) -> pl.DataFrame:
     """Wide ``{ticker}_{ohlc_column}`` frame for the *ticker_class* slice.
 
     Slices the resolved panel (an injected one, or the lazily-built clean
     panel -- see :func:`_resolve`) when it carries every requested column;
     otherwise fetches -- the grouped-daily bulk endpoint when tickers
-    outnumber the window's trading days, else a per-ticker inner join. Every
-    path returns the same wide, time-aligned frame: a ``Timestamp`` column
-    plus one column per ticker.
+    outnumber the window's trading days, else a per-ticker join. Every path
+    returns the same wide, time-aligned frame: a ``Timestamp`` column plus one
+    column per ticker.
+
+    With ``drop_missing=False`` the fetch paths keep every trading day *any*
+    ticker traded (a full outer union, null where a ticker has no bar) instead
+    of inner-joining down to the days they all share -- so a single sparse
+    ticker can't collapse the panel. Use it for per-ticker analyses (e.g.
+    Fama-French) that align each ticker to shared exogenous data rather than to
+    one another; the inner-join default stays for analyses that need a common
+    grid across tickers.
     """
     tickers = get_tickers(config, ticker_class)
     wanted = [f"{ticker}_{ohlc_column}" for ticker in tickers]
@@ -729,10 +739,17 @@ def column(
         return panel.select(OHLCHeader.TIMESTAMP, *wanted)
     if _prefer_bulk_fetch(config):
         return get_grouped_daily_column(
-            config, tickers, ohlc_column, max_workers=config.max_workers
+            config,
+            tickers,
+            ohlc_column,
+            drop_missing=drop_missing,
+            max_workers=config.max_workers,
         )
+    how: Literal["inner", "full"] = "inner" if drop_missing else "full"
     return reduce(
-        lambda left, right: left.join(right, on=OHLCHeader.TIMESTAMP, how="inner"),
+        lambda left, right: left.join(
+            right, on=OHLCHeader.TIMESTAMP, how=how, coalesce=True
+        ),
         [_ticker_column(config, ticker, ohlc_column) for ticker in tickers],
     )
 
@@ -757,8 +774,10 @@ def benchmark_column(
 def get_ohlc_column_for_tickers(
     config: AnalysisConfig,
     ticker_class: TickerClass = "all",
+    *,
+    drop_missing: bool = True,
 ) -> pl.DataFrame:
-    return column(config, config.ohlc_column, ticker_class)
+    return column(config, config.ohlc_column, ticker_class, drop_missing=drop_missing)
 
 
 def get_ohlc_column_for_benchmark(config: AnalysisConfig) -> pl.DataFrame:

@@ -161,15 +161,23 @@ def get_variables(config: AnalysisConfig) -> Mapping[str, pl.DataFrame]:
     The factors are fetched once and shared across the per-ticker frames.
     """
     tickers = get_tickers(config)
-    returns = get_ohlc_column_for_tickers(config).select(
-        OHLCHeader.TIMESTAMP,
-        pl.col(OHLCHeader.TIMESTAMP).dt.date().alias(_DATE_COLUMN),
-        *[
-            pl.col(f"{ticker}_{config.ohlc_column}")
-            .pct_change()
-            .alias(f"{ticker}_{_RETURN_COLUMN_NAME}")
-            for ticker in tickers
-        ],
+    # Fetch null-preserving (a full outer union, not the cross-ticker inner
+    # join): each ticker is regressed on the shared factors independently, so a
+    # sparse name must not drop another's trading days. Sort before pct_change,
+    # which is order-dependent and the outer union isn't guaranteed sorted.
+    returns = (
+        get_ohlc_column_for_tickers(config, drop_missing=False)
+        .sort(OHLCHeader.TIMESTAMP)
+        .select(
+            OHLCHeader.TIMESTAMP,
+            pl.col(OHLCHeader.TIMESTAMP).dt.date().alias(_DATE_COLUMN),
+            *[
+                pl.col(f"{ticker}_{config.ohlc_column}")
+                .pct_change()
+                .alias(f"{ticker}_{_RETURN_COLUMN_NAME}")
+                for ticker in tickers
+            ],
+        )
     )
     merged = returns.join(fetch_fama_french_factors(), on=_DATE_COLUMN, how="inner")
     return {
@@ -314,6 +322,17 @@ def get_residuals(
             specification.verify_out_of_sample(target)
     if variables is None:
         variables = get_variables(config)
+    # Latest day with both a price and factor data. Ken French factors lag
+    # ~1-2 months, so out-of-sample dates past this can't be evaluated -- used
+    # to turn the otherwise-cryptic "no observation" failure into actionable
+    # guidance.
+    covered = [
+        cast(dt.date, last)
+        for frame in variables.values()
+        if frame.height
+        and (last := frame[OHLCHeader.TIMESTAMP].dt.date().max()) is not None
+    ]
+    latest_covered = max(covered) if covered else None
     frames: list[pl.DataFrame] = []
     for date_str, target in zip(date_list, targets):
         records = [
@@ -322,7 +341,15 @@ def get_residuals(
             for record in _residual_records(variables, target, specification)
         ]
         if not records:
-            logger.warning("No ticker had an observation on %s; skipping.", target)
+            if latest_covered is not None and target > latest_covered:
+                logger.warning(
+                    "No factor data on %s yet (available through %s; Ken French "
+                    "factors lag ~1-2 months); skipping.",
+                    target,
+                    latest_covered,
+                )
+            else:
+                logger.warning("No ticker had an observation on %s; skipping.", target)
             continue
         frames.append(
             pl.DataFrame(
@@ -338,6 +365,13 @@ def get_residuals(
             ).with_columns(pl.lit(date_str).alias(_OOS_DATE_COLUMN))
         )
     if not frames:
+        if latest_covered is not None and all(t > latest_covered for t in targets):
+            raise ValueError(
+                f"No Fama-French factor data for out-of-sample date(s) "
+                f"{date_list}: prices and factors are only available through "
+                f"{latest_covered} (Ken French factors lag ~1-2 months). "
+                f"Choose an out-of-sample date on or before {latest_covered}."
+            )
         raise ValueError(f"No ticker had any observation across dates {date_list}.")
     return pl.concat(frames).select(
         _OOS_DATE_COLUMN,

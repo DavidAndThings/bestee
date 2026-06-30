@@ -181,6 +181,31 @@ class TestDataSourceColumnAccess:
         bulk.assert_called_once()
         ohlc.assert_not_called()
 
+    def test_drop_missing_false_keeps_sparse_ticker_history(self) -> None:
+        # Regression: a single sparse ticker must not collapse the per-ticker
+        # panel. AAA trades 8 days, BBB just 1 (a shared day). The inner-join
+        # default collapses to that shared day; drop_missing=False keeps the
+        # union so a per-ticker analysis (e.g. Fama-French) still sees AAA's
+        # full history instead of one row.
+        days = _weekdays(8)
+        per_ticker = {
+            "AAA": pl.DataFrame({TS: days, CLOSE: [float(i + 1) for i in range(8)]}),
+            "BBB": pl.DataFrame({TS: [days[5]], CLOSE: [10.0]}),
+        }
+        config = AnalysisConfig(
+            tickers=["AAA", "BBB"], start_date="2024-01-01", end_date="2024-12-31"
+        )
+        with patch(_BULK_PATCH) as bulk, patch(_OHLC_PATCH) as ohlc:
+            ohlc.side_effect = lambda ticker, query: per_ticker[ticker]
+            collapsed = tools.get_ohlc_column_for_tickers(config)
+            union = tools.get_ohlc_column_for_tickers(config, drop_missing=False)
+        bulk.assert_not_called()
+        assert collapsed.height == 1  # inner join -> only the shared day
+        assert union.columns == [TS, "AAA_Close", "BBB_Close"]
+        assert union.height == 8  # full outer union of every trading day
+        assert union["AAA_Close"].null_count() == 0
+        assert union["BBB_Close"].null_count() == 7  # only the shared day
+
     def test_universe_auto_screens_without_an_injected_panel(self) -> None:
         # 6 tickers over a 2-weekday window -> bulk path; no panel injected.
         tickers = [f"T{i}" for i in range(6)]

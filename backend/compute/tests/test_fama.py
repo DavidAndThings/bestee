@@ -382,6 +382,7 @@ class TestGetResiduals:
             residuals = fama.get_residuals(config, target.date().isoformat(), [spec])
 
         assert residuals.columns == [
+            "Date",
             "Ticker",
             "Specification",
             "Residual",
@@ -425,12 +426,13 @@ class TestGetResiduals:
             end=dates[200].date().isoformat(),
             factors=3,
         )
-        # After the window AND past the data -> no row for any ticker.
+        # After the window AND past the data (and past the factor coverage) ->
+        # no row for any ticker, with actionable guidance on the latest date.
         future = (dates[-1] + dt.timedelta(days=30)).date().isoformat()
         with patch(
             "bestee_compute.workflow.fama.get_variables", return_value={"AAA": frame}
         ):
-            with pytest.raises(ValueError, match="No ticker had an observation"):
+            with pytest.raises(ValueError, match="No Fama-French factor data"):
                 fama.get_residuals(config, future, [spec])
 
     def test_one_row_per_ticker(self) -> None:
