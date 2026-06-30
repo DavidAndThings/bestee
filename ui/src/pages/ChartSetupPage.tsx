@@ -6,6 +6,7 @@ import { badgeClass } from "../lib/badge";
 import { humanizeKey } from "../lib/format";
 import { jobsApi } from "../services/jobsApi";
 import DateField from "../components/DateField";
+import MultiDateField from "../components/MultiDateField";
 import TickerSearchField from "../components/TickerSearchField";
 
 // Ticker fields hold a `string[]` of selected terms; every other field a string.
@@ -45,6 +46,21 @@ function parseArray(raw: string): string[] {
     .filter(Boolean);
 }
 
+/** Field display label: an explicit `label` override, else the humanized key. */
+function fieldLabel(key: string, def: FieldDef): string {
+  return def.label ?? humanizeKey(key);
+}
+
+/** Whether a field is a multi-date list (an `array` of `date` items). */
+function isDateList(def: FieldDef): boolean {
+  return def.type === "array" && def.items?.type === "date";
+}
+
+/** True for a valid ISO `yyyy-mm-dd` date string. */
+function isISODate(value: string): boolean {
+  return /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(value));
+}
+
 /** The HTML input `type` for a free-entry text/number field. `date` fields are
  * rendered separately with a calendar (see DateField). */
 function inputType(type: FieldType): string {
@@ -57,10 +73,17 @@ function coerceValue(
   raw: FormValue,
 ): { value?: unknown; error?: string } {
   if (def.type === "array") {
-    // Ticker fields supply a string[]; a non-ticker array would be free text.
-    const items = Array.isArray(raw) ? raw : parseArray(raw);
+    // Ticker / date fields supply a string[]; a plain array would be free text.
+    const items = (Array.isArray(raw) ? raw : parseArray(raw))
+      .map((item) => (typeof item === "string" ? item.trim() : item))
+      .filter((item) => item !== "");
     if (items.length === 0) {
-      return { error: `${humanizeKey(key)} needs at least one value.` };
+      // Optional lists (e.g. regime's out-of-sample dates) may be left empty.
+      if (def.optional) return { value: undefined };
+      return { error: `${fieldLabel(key, def)} needs at least one value.` };
+    }
+    if (def.items?.type === "date" && !items.every(isISODate)) {
+      return { error: `${fieldLabel(key, def)} must all be valid dates.` };
     }
     return { value: items };
   }
@@ -73,30 +96,27 @@ function coerceValue(
     if (def.optional) {
       return { value: undefined };
     }
-    return { error: `${humanizeKey(key)} is required.` };
+    return { error: `${fieldLabel(key, def)} is required.` };
   }
 
   if (def.type === "integer") {
     const number = Number(trimmed);
     if (!Number.isFinite(number) || !Number.isInteger(number)) {
-      return { error: `${humanizeKey(key)} must be a whole number.` };
+      return { error: `${fieldLabel(key, def)} must be a whole number.` };
     }
     return { value: number };
   }
 
   if (def.type === "date") {
     // A native date input yields an ISO yyyy-mm-dd string.
-    if (
-      !/^\d{4}-\d{2}-\d{2}$/.test(trimmed) ||
-      Number.isNaN(Date.parse(trimmed))
-    ) {
-      return { error: `${humanizeKey(key)} must be a valid date.` };
+    if (!isISODate(trimmed)) {
+      return { error: `${fieldLabel(key, def)} must be a valid date.` };
     }
     return { value: trimmed };
   }
 
   if (def.choices && !def.choices.includes(trimmed)) {
-    return { error: `Choose a valid ${humanizeKey(key)} option.` };
+    return { error: `Choose a valid ${fieldLabel(key, def)} option.` };
   }
 
   return { value: trimmed };
@@ -230,7 +250,7 @@ function ChartSetupPage() {
                     htmlFor={id}
                     className="label-text mb-5 block text-base font-semibold tracking-wide"
                   >
-                    {humanizeKey(key)}
+                    {fieldLabel(key, def)}
                   </label>
 
                   {def.choices ? (
@@ -267,6 +287,14 @@ function ChartSetupPage() {
                       single
                       values={stringValue ? [stringValue] : []}
                       onChange={(next) => updateValue(key, next[0] ?? "")}
+                      invalid={!!error}
+                      autoFocus={autoFocus}
+                    />
+                  ) : isDateList(def) ? (
+                    <MultiDateField
+                      id={id}
+                      values={arrayValue}
+                      onChange={(next) => updateValue(key, next)}
                       invalid={!!error}
                       autoFocus={autoFocus}
                     />
@@ -310,6 +338,7 @@ function ChartSetupPage() {
                       {def.description}
                       {def.type === "array" &&
                         !def.ticker &&
+                        !isDateList(def) &&
                         " Separate values with commas or new lines."}
                     </span>
                     {error && (

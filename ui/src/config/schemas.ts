@@ -13,6 +13,9 @@ export type ResultAspect = { name: string; label: string };
 export type FieldDef = {
   type: FieldType;
   description: string;
+  /** Display label for the field; defaults to the humanized key when unset.
+   *  Use it to spell out abbreviations (e.g. "Out-of-sample dates"). */
+  label?: string;
   choices?: string[];
   items?: { type: FieldType };
   /** Whether the field may be omitted (mirrors an optional / defaulted model field). */
@@ -289,10 +292,12 @@ const REGIME_DETECTION_SCHEMA: Schema = {
         "Optional benchmark security. When set, each asset is residualized against it with a rolling market-model (OLS) regression; left blank, residualization falls back to PCA over the basket itself.",
       optional: true,
     },
-    oos_date: {
-      type: "date",
+    oos_dates: {
+      type: "array",
+      items: { type: "date" },
+      label: "Out-of-sample dates",
       description:
-        "Optional out-of-sample date (after the end date). When set, the fitted model is held fixed and used to classify the regime on that date, included alongside the in-sample labels.",
+        "Optional out-of-sample dates (each after the end date). When set, the fitted model is held fixed and used to classify the regime on those dates, included alongside the in-sample labels.",
       optional: true,
     },
   },
@@ -300,21 +305,20 @@ const REGIME_DETECTION_SCHEMA: Schema = {
     const errors: Record<string, string> = {};
     const start = payload.start_date;
     const end = payload.end_date;
-    const oos = payload.oos_date;
     if (typeof start === "string" && typeof end === "string" && start > end) {
       errors.end_date = "The end date must be on or after the start date.";
     }
-    if (typeof end === "string" && typeof oos === "string" && oos <= end) {
-      errors.oos_date = "The out-of-sample date must be after the end date.";
+    const oosDates = Array.isArray(payload.oos_dates) ? payload.oos_dates : [];
+    if (
+      typeof end === "string" &&
+      oosDates.some((oos) => typeof oos === "string" && oos <= end)
+    ) {
+      errors.oos_dates = "Every out-of-sample date must be after the end date.";
     }
     return errors;
   },
-  // The model takes a list of `oos_dates`; the form collects a single optional
-  // date, wrapped into that list here (omitted when left blank).
-  toRequestBody: (payload) => {
-    const { oos_date, ...rest } = payload;
-    return oos_date ? { ...rest, oos_dates: [oos_date] } : rest;
-  },
+  // The form field is already named `oos_dates` and yields the list the model
+  // expects (omitted when left blank), so no payload reshaping is needed.
 };
 
 const FAMA_FRENCH_SCHEMA: Schema = {
@@ -342,31 +346,36 @@ const FAMA_FRENCH_SCHEMA: Schema = {
       type: "date",
       description: "End of the estimation window.",
     },
-    oos_date: {
-      type: "date",
+    oos_dates: {
+      type: "array",
+      items: { type: "date" },
+      label: "Out-of-sample dates",
       description:
-        "Out-of-sample date for the residuals; must fall after the end date.",
+        "One or more out-of-sample dates for the residuals; each must fall after the end date.",
     },
   },
   validate: (payload) => {
     const errors: Record<string, string> = {};
     const start = payload.start_date;
     const end = payload.end_date;
-    const oos = payload.oos_date;
     if (typeof start === "string" && typeof end === "string" && start > end) {
       errors.end_date = "The end date must be on or after the start date.";
     }
-    if (typeof end === "string" && typeof oos === "string" && oos <= end) {
-      errors.oos_date = "The out-of-sample date must be after the end date.";
+    const oosDates = Array.isArray(payload.oos_dates) ? payload.oos_dates : [];
+    if (
+      typeof end === "string" &&
+      oosDates.some((oos) => typeof oos === "string" && oos <= end)
+    ) {
+      errors.oos_dates = "Every out-of-sample date must be after the end date.";
     }
     return errors;
   },
   // The model takes one or more estimation `intervals` and `oos_dates`; the
-  // form collects a single window + OOS date, wrapped here into those lists.
+  // form collects a single window plus the OOS date list, wrapped here.
   toRequestBody: (payload) => ({
     tickers: payload.tickers,
     intervals: [{ start_date: payload.start_date, end_date: payload.end_date }],
-    oos_dates: [payload.oos_date],
+    oos_dates: payload.oos_dates,
   }),
 };
 
